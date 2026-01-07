@@ -1,10 +1,12 @@
-# OneTrainer UI Removal Plan
+# OneTrainer UI Audit & Plan
 
-**Status:** DEFERRED - Keep all UI code until EriUI is fully operational
+**Status:**
+- Tkinter UI: REMOVE (once EriUI stable)
+- Web UI: KEEP as fallback
 
 ## Code Audit Summary
 
-### UI Code (To Be Removed Later)
+### UI Code
 
 | Component | Lines | Path | Notes |
 |-----------|-------|------|-------|
@@ -32,9 +34,7 @@
 
 ## Removal Checklist (Future)
 
-When EriUI fully replaces UI functionality:
-
-### Phase 1: Remove Tkinter
+### Phase 1: Remove Tkinter (once EriUI stable)
 - [ ] Delete `modules/ui/` directory (7,994 lines)
 - [ ] Delete `scripts/train_ui.py`
 - [ ] Delete `scripts/caption_ui.py`
@@ -42,15 +42,17 @@ When EriUI fully replaces UI functionality:
 - [ ] Delete `scripts/video_tool_ui.py`
 - [ ] Remove tkinter from requirements.txt
 
-### Phase 2: Remove Web UI
-- [ ] Delete `web_ui/` directory (35,325 lines)
-- [ ] Remove FastAPI, uvicorn from requirements
-- [ ] Remove React/Node dependencies
+### Phase 2: Web UI - KEEP AS FALLBACK
+Web UI (35,325 lines) retained for:
+- Browser-based access when Flutter unavailable
+- Remote training management
+- API reference implementation
+- Debugging/diagnostics
 
-### Phase 3: Cleanup
-- [ ] Remove any orphaned UI-only utilities
+### Phase 3: Cleanup (after Tkinter removal)
+- [ ] Remove any orphaned tkinter-only utilities
 - [ ] Update imports that reference removed modules
-- [ ] Test all training functionality via EriUI
+- [ ] Test all training functionality via EriUI + Web UI fallback
 
 ## Integration Points
 
