@@ -7,3 +7,17 @@ __pycache__/
 build/
 .flutter-plugins*
 .packages
+
+# OneTrainer excludes
+onetrainer/venv/
+onetrainer/**/__pycache__/
+onetrainer/*.pyc
+onetrainer/models/
+onetrainer/workspace/
+onetrainer/workspace-cache/
+onetrainer/wandb/
+onetrainer/datasets/
+onetrainer/web_ui/frontend/node_modules/
+onetrainer/web_ui/frontend/dist/
+onetrainer/**/*.ldb
+onetrainer/**/*.log
