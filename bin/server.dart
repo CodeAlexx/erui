@@ -566,6 +566,114 @@ class ComfyUIProxy {
     return workflow;
   }
 
+  /// Build LTX-2 video workflow from template
+  Map<String, dynamic> _buildLTX2Workflow({
+    required String prompt,
+    String negativePrompt = '',
+    required String model,
+    int width = 768,
+    int height = 512,
+    int frames = 121,
+    int steps = 20,
+    double cfg = 3.0,
+    int seed = -1,
+    String? loraModel,
+    double loraStrength = 1.0,
+  }) {
+    // LTX-2 API workflow - simplified direct node construction
+    final workflow = <String, dynamic>{};
+
+    // Node 1: Checkpoint loader
+    workflow["1"] = {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {"ckpt_name": model}
+    };
+
+    // Node 2: CLIP loader for Gemma
+    workflow["2"] = {
+      "class_type": "LTXVGemmaCLIPModelLoader",
+      "inputs": {"clip_name": "gemma_3_12B_it.safetensors"}
+    };
+
+    // Node 3: Positive prompt
+    workflow["3"] = {
+      "class_type": "CLIPTextEncode",
+      "inputs": {"text": prompt, "clip": ["2", 0]}
+    };
+
+    // Node 4: Negative prompt
+    workflow["4"] = {
+      "class_type": "CLIPTextEncode",
+      "inputs": {"text": negativePrompt, "clip": ["2", 0]}
+    };
+
+    // Node 5: Empty latent
+    workflow["5"] = {
+      "class_type": "EmptyLTXVLatentVideo",
+      "inputs": {"width": width, "height": height, "length": frames, "batch_size": 1}
+    };
+
+    // Node 6: Scheduler
+    workflow["6"] = {
+      "class_type": "LTXVScheduler",
+      "inputs": {"steps": steps, "max_shift": 2.05, "base_shift": 0.95, "stretch": true, "terminal": 0.1}
+    };
+
+    // Node 7: Sampler select
+    workflow["7"] = {
+      "class_type": "KSamplerSelect",
+      "inputs": {"sampler_name": "euler"}
+    };
+
+    // Node 8: Model reference (with optional LoRA)
+    var modelRef = ["1", 0];
+    if (loraModel != null && loraModel.isNotEmpty) {
+      workflow["20"] = {
+        "class_type": "LoraLoaderModelOnly",
+        "inputs": {"model": ["1", 0], "lora_name": loraModel, "strength_model": loraStrength}
+      };
+      modelRef = ["20", 0];
+    }
+
+    // Node 9: Sampler
+    workflow["9"] = {
+      "class_type": "SamplerCustomAdvanced",
+      "inputs": {
+        "noise": ["10", 0],
+        "guider": ["11", 0],
+        "sampler": ["7", 0],
+        "sigmas": ["6", 0],
+        "latent_image": ["5", 0]
+      }
+    };
+
+    // Node 10: Random noise
+    workflow["10"] = {
+      "class_type": "RandomNoise",
+      "inputs": {"noise_seed": seed}
+    };
+
+    // Node 11: CFG guider
+    workflow["11"] = {
+      "class_type": "CFGGuider",
+      "inputs": {"model": modelRef, "positive": ["3", 0], "negative": ["4", 0], "cfg": cfg}
+    };
+
+    // Node 12: VAE Decode
+    workflow["12"] = {
+      "class_type": "VAEDecode",
+      "inputs": {"samples": ["9", 0], "vae": ["1", 2]}
+    };
+
+    // Node 13: Save video
+    workflow["13"] = {
+      "class_type": "SaveVideo",
+      "inputs": {"video": ["12", 0], "filename_prefix": "EriUI_LTX2", "format": "mp4", "codec": "auto"}
+    };
+
+    return workflow;
+  }
+
   /// Get available video models from diffusion_models folder
   Future<List<Map<String, dynamic>>> getVideoModels() async {
     try {
@@ -1552,8 +1660,28 @@ class EriUIApi {
     await comfy.connectWebSocket();
 
     Map<String, dynamic> workflow;
-    if (isVideoMode) {
-      // Build video workflow
+    final isLTX2 = model.toLowerCase().contains('ltx');
+
+    if (isVideoMode && isLTX2) {
+      // Build LTX-2 video workflow
+      final loraModel = loras?.isNotEmpty == true ? loras!.first['name'] as String? : null;
+      final loraStrength = loras?.isNotEmpty == true ? (loras!.first['strength'] as num?)?.toDouble() ?? 1.0 : 1.0;
+      workflow = comfy._buildLTX2Workflow(
+        prompt: body['prompt'] as String? ?? '',
+        negativePrompt: body['negativeprompt'] as String? ?? body['negative_prompt'] as String? ?? '',
+        model: model,
+        width: body['width'] as int? ?? 768,
+        height: body['height'] as int? ?? 512,
+        frames: body['frames'] as int? ?? 121,
+        steps: body['steps'] as int? ?? 20,
+        cfg: (body['cfgscale'] as num?)?.toDouble() ?? (body['cfg'] as num?)?.toDouble() ?? 3.0,
+        seed: seed,
+        loraModel: loraModel,
+        loraStrength: loraStrength,
+      );
+      print('Built LTX-2 workflow with ${workflow.length} nodes');
+    } else if (isVideoMode) {
+      // Build Wan/other video workflow
       workflow = comfy._buildVideoWorkflow(
         prompt: body['prompt'] as String? ?? '',
         negativePrompt: body['negativeprompt'] as String? ?? body['negative_prompt'] as String? ?? '',
