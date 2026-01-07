@@ -503,7 +503,7 @@ class ComfyUIProxy {
 
     // Empty video latent
     workflow["${nodeId}"] = {
-      "class_type": "EmptyHunyuanVideoLatent",
+      "class_type": "EmptyHunyuanLatentVideo",
       "inputs": {"width": width, "height": height, "length": frames, "batch_size": 1}
     };
     final latentNode = "${nodeId}";
