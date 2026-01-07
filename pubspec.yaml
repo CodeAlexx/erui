@@ -1,0 +1,58 @@
+name: eriui_server
+description: EriUI - A Flutter/Dart replacement for SwarmUI with full feature parity
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  # Web server
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  shelf_static: ^1.1.2
+  shelf_web_socket: ^1.0.4
+  shelf_cors_headers: ^0.1.5
+
+  # HTTP client
+  dio: ^5.4.0
+
+  # WebSocket
+  web_socket_channel: ^2.4.0
+
+  # Database
+  hive: ^2.2.3
+
+  # JSON serialization
+  json_annotation: ^4.8.1
+  freezed_annotation: ^2.4.1
+
+  # Utilities
+  uuid: ^4.2.2
+  path: ^1.8.3
+  collection: ^1.18.0
+  args: ^2.4.2
+  crypto: ^3.0.3
+  mime: ^1.0.5
+  intl: ^0.19.0
+
+  # Async utilities
+  async: ^2.11.0
+  stream_channel: ^2.1.2
+
+  # Logging
+  logging: ^1.2.0
+
+  # Image processing
+  image: ^4.1.7
+
+dev_dependencies:
+  build_runner: ^2.4.8
+  json_serializable: ^6.7.1
+  freezed: ^2.4.6
+  test: ^1.25.2
+  lints: ^3.0.0
+
+# Uncomment for Flutter frontend integration later
+# flutter:
+#   uses-material-design: true

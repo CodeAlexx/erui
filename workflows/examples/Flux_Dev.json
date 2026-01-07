@@ -1,0 +1,93 @@
+{
+  "name": "Flux Dev",
+  "description": "Flux Dev workflow using UNET loader with T5 text encoder",
+  "tags": ["flux", "text2img", "diffusion_model"],
+  "enable_in_generate": true,
+  "created": "2026-01-07T00:00:00Z",
+  "modified": "2026-01-07T00:00:00Z",
+
+  "parameters": {
+    "prompt": {"type": "text", "label": "Prompt", "default": "a beautiful landscape"},
+    "model": {"type": "model", "label": "Model", "default": "flux1-dev.safetensors"},
+    "seed": {"type": "integer", "label": "Seed", "default": -1},
+    "steps": {"type": "integer", "label": "Steps", "default": 20, "min": 1, "max": 50},
+    "cfg": {"type": "decimal", "label": "CFG Scale", "default": 1.0, "min": 1, "max": 10},
+    "width": {"type": "integer", "label": "Width", "default": 1024},
+    "height": {"type": "integer", "label": "Height", "default": 1024}
+  },
+
+  "prompt": {
+    "4": {
+      "class_type": "UNETLoader",
+      "inputs": {
+        "unet_name": "${model:flux1-dev.safetensors}",
+        "weight_dtype": "default"
+      }
+    },
+    "11": {
+      "class_type": "DualCLIPLoader",
+      "inputs": {
+        "clip_name1": "t5xxl_fp16.safetensors",
+        "clip_name2": "clip_l.safetensors",
+        "type": "flux"
+      }
+    },
+    "12": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "ae.safetensors"
+      }
+    },
+    "5": {
+      "class_type": "EmptySD3LatentImage",
+      "inputs": {
+        "width": "${width:1024}",
+        "height": "${height:1024}",
+        "batch_size": 1
+      }
+    },
+    "6": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "${prompt}",
+        "clip": ["11", 0]
+      }
+    },
+    "22": {
+      "class_type": "FluxGuidance",
+      "inputs": {
+        "guidance": "${cfg:3.5}",
+        "conditioning": ["6", 0]
+      }
+    },
+    "3": {
+      "class_type": "KSampler",
+      "inputs": {
+        "seed": "${seed:-1}",
+        "steps": "${steps:20}",
+        "cfg": 1.0,
+        "sampler_name": "euler",
+        "scheduler": "simple",
+        "denoise": 1.0,
+        "model": ["4", 0],
+        "positive": ["22", 0],
+        "negative": ["6", 0],
+        "latent_image": ["5", 0]
+      }
+    },
+    "8": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["3", 0],
+        "vae": ["12", 0]
+      }
+    },
+    "9": {
+      "class_type": "SaveImage",
+      "inputs": {
+        "filename_prefix": "EriUI_Flux",
+        "images": ["8", 0]
+      }
+    }
+  }
+}
