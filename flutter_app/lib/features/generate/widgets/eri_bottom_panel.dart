@@ -261,7 +261,21 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
 
     // Create unified list with current batch first
     final allEntries = <_HistoryEntry>[
-      ...currentImages.map((url) => _HistoryEntry(url: url, thumbnailUrl: null, isCurrentSession: true)),
+      ...currentImages.map((url) {
+        // For current session videos, construct thumbnail URL from the video URL
+        String? thumbUrl;
+        if (isVideoUrl(url)) {
+          // Extract path from URL and create thumbnail URL
+          // URL format: http://host:port/API/GetHistoryImage?path=...
+          // Or direct path: http://host:port/path/to/video.mp4
+          final uri = Uri.parse(url);
+          final path = uri.queryParameters['path'];
+          if (path != null) {
+            thumbUrl = '${apiService.baseUrl}/API/GetVideoThumbnail?path=${Uri.encodeComponent(path)}';
+          }
+        }
+        return _HistoryEntry(url: url, thumbnailUrl: thumbUrl, isCurrentSession: true);
+      }),
       ...historyImages.map((img) => _HistoryEntry(
         url: '${apiService.baseUrl}${img.url}',
         thumbnailUrl: img.thumbnailUrl != null ? '${apiService.baseUrl}${img.thumbnailUrl}' : null,
@@ -523,15 +537,54 @@ class _VideoPlayerDialog extends StatefulWidget {
 class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
   Player? _player;
   VideoController? _controller;
+  bool _isLoading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
     print('Video URL: ${widget.videoUrl}');
-    _player = Player();
-    _controller = VideoController(_player!);
-    _player!.open(Media(widget.videoUrl));
-    _player!.setPlaylistMode(PlaylistMode.loop);
+    _initPlayer();
+  }
+
+  Future<void> _initPlayer() async {
+    try {
+      _player = Player();
+      _controller = VideoController(_player!);
+
+      // Listen for player state changes
+      _player!.stream.playing.listen((playing) {
+        if (mounted && _isLoading && playing) {
+          setState(() => _isLoading = false);
+        }
+      });
+
+      _player!.stream.error.listen((error) {
+        if (mounted && error.isNotEmpty) {
+          setState(() {
+            _isLoading = false;
+            _error = error;
+          });
+        }
+      });
+
+      await _player!.open(Media(widget.videoUrl));
+      await _player!.setPlaylistMode(PlaylistMode.loop);
+
+      // Set loading to false after a short delay if video starts
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted && _isLoading && _error == null) {
+          setState(() => _isLoading = false);
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = e.toString();
+        });
+      }
+    }
   }
 
   @override
@@ -543,6 +596,8 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Dialog(
       backgroundColor: Colors.black,
       insetPadding: const EdgeInsets.all(40),
@@ -552,18 +607,41 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
         color: Colors.black,
         child: Stack(
           children: [
-            // Video player
-            Center(
-              child: AspectRatio(
-                aspectRatio: 4 / 3,
-                child: _controller != null
-                    ? Video(
-                        controller: _controller!,
-                        controls: MaterialVideoControls,
-                      )
-                    : const SizedBox(),
+            // Video player - uses FittedBox to maintain aspect ratio
+            if (_controller != null && _error == null)
+              Center(
+                child: Video(
+                  controller: _controller!,
+                  controls: MaterialVideoControls,
+                  fit: BoxFit.contain,
+                ),
               ),
-            ),
+            // Loading indicator
+            if (_isLoading && _error == null)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: colorScheme.primary),
+                    const SizedBox(height: 16),
+                    const Text('Loading video...', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
+            // Error display
+            if (_error != null)
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.error_outline, color: colorScheme.error, size: 48),
+                    const SizedBox(height: 16),
+                    Text('Failed to load video', style: TextStyle(color: colorScheme.error)),
+                    const SizedBox(height: 8),
+                    Text(_error!, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  ],
+                ),
+              ),
             // Close button
             Positioned(
               top: 8,
@@ -596,7 +674,8 @@ class _ModelsGridTab extends ConsumerWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final modelsState = ref.watch(modelsProvider);
     final params = ref.watch(generationParamsProvider);
-    final models = modelsState.checkpoints;
+    // Combine checkpoints AND diffusion models (Flux, Wan, LTX, etc.)
+    final models = [...modelsState.checkpoints, ...modelsState.diffusionModels];
 
     return Column(
       children: [
@@ -971,11 +1050,38 @@ class _LoraCard extends ConsumerWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 2),
-                    // Type
-                    Text(
-                      'Type: (Unset)',
-                      style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant),
-                      maxLines: 1,
+                    // Type (LoRA or LyCORIS)
+                    Row(
+                      children: [
+                        Text(
+                          'Type: ',
+                          style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: lora.isLycoris
+                                ? Colors.purple.withOpacity(0.2)
+                                : Colors.blue.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            lora.type,
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: lora.isLycoris ? Colors.purple : Colors.blue,
+                            ),
+                          ),
+                        ),
+                        if (lora.baseModel != null) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            lora.baseModel!,
+                            style: TextStyle(fontSize: 9, color: colorScheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     // Resolution

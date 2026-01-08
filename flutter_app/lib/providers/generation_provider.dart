@@ -1,4 +1,4 @@
-import 'dart:async';
+import 'dart:async' show Timer;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/api_service.dart';
 import 'session_provider.dart';
@@ -71,56 +71,14 @@ class GenerationState {
   }
 }
 
-/// Generation notifier
+/// Generation notifier - uses polling for progress updates
 class GenerationNotifier extends StateNotifier<GenerationState> {
   final ApiService _apiService;
   final SessionState _session;
-  StreamSubscription<Map<String, dynamic>>? _wsSubscription;
   Timer? _pollTimer;
 
   GenerationNotifier(this._apiService, this._session)
-      : super(const GenerationState()) {
-    _listenToWebSocket();
-  }
-
-  void _listenToWebSocket() {
-    _wsSubscription = _apiService.wsMessages.listen((message) {
-      final type = message['type'] as String?;
-
-      if (type == 'generation_progress') {
-        final genId = message['generation_id'] as String?;
-        if (genId == state.generationId) {
-          state = state.copyWith(
-            currentStep: message['step'] as int? ?? state.currentStep,
-            totalSteps: message['total_steps'] as int? ?? state.totalSteps,
-            progress: (message['progress'] as num?)?.toDouble() ?? state.progress,
-            currentImage: message['preview'] as String?,
-          );
-        }
-      } else if (type == 'generation_complete') {
-        final genId = message['generation_id'] as String?;
-        if (genId == state.generationId) {
-          final images = (message['images'] as List<dynamic>?)
-                  ?.map((e) => e as String)
-                  .toList() ??
-              [];
-          state = state.copyWith(
-            isGenerating: false,
-            progress: 1.0,
-            generatedImages: images,
-          );
-        }
-      } else if (type == 'generation_error') {
-        final genId = message['generation_id'] as String?;
-        if (genId == state.generationId) {
-          state = state.copyWith(
-            isGenerating: false,
-            error: message['error'] as String? ?? 'Generation failed',
-          );
-        }
-      }
-    });
-  }
+      : super(const GenerationState());
 
   /// Poll progress for a generation
   void _startPolling(String generationId) {
@@ -224,6 +182,26 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
           if (params.videoMode) 'video_format': params.videoFormat,
           if (params.videoMode && params.highNoiseModel != null) 'high_noise_model': params.highNoiseModel,
           if (params.videoMode && params.lowNoiseModel != null) 'low_noise_model': params.lowNoiseModel,
+          // I2V parameters - send augmentation level when init image is set with video mode
+          if (params.videoMode && params.initImage != null) 'videoaugmentationlevel': params.videoAugmentationLevel,
+          // Variation seed parameters
+          if (params.variationSeed != null) 'variationseed': params.variationSeed,
+          if (params.variationStrength > 0) 'variationseedstrength': params.variationStrength,
+          // Init image (img2img) parameters
+          if (params.initImage != null) 'initimage': params.initImage,
+          if (params.initImage != null) 'initimagecreativity': params.initImageCreativity,
+          // Refine/Upscale parameters
+          if (params.refinerModel != null && params.refinerModel != 'None') 'refinermodel': params.refinerModel,
+          if (params.upscaleFactor > 1.0) 'upscale': params.upscaleFactor,
+          if (params.refinerModel != null && params.refinerModel != 'None') 'refinersteps': params.refinerSteps,
+          // ControlNet parameters
+          if (params.controlNetImage != null) 'controlnetimage': params.controlNetImage,
+          if (params.controlNetModel != null && params.controlNetModel != 'None') 'controlnetmodel': params.controlNetModel,
+          if (params.controlNetModel != null && params.controlNetModel != 'None') 'controlnetstrength': params.controlNetStrength,
+          // Advanced model addons
+          if (params.vae != null && params.vae != 'Automatic') 'vae': params.vae,
+          if (params.textEncoder != null && params.textEncoder != 'Default') 'textencoder': params.textEncoder,
+          if (params.precision != null && params.precision != 'Automatic') 'modelprecision': params.precision,
           ...params.extraParams,
         },
       );
@@ -292,7 +270,6 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
 
   @override
   void dispose() {
-    _wsSubscription?.cancel();
     _pollTimer?.cancel();
     super.dispose();
   }
@@ -322,6 +299,32 @@ class GenerationParams {
   final int fps;
   final String videoFormat;
 
+  // Image-to-Video (I2V) parameters
+  final double videoAugmentationLevel;  // Noise level for I2V (LTX default: 0.15, SVD default: 0)
+
+  // Variation seed parameters
+  final int? variationSeed;
+  final double variationStrength;
+
+  // Init image (img2img) parameters
+  final String? initImage;  // Base64 or URL
+  final double initImageCreativity;  // Denoising strength
+
+  // Refine/Upscale parameters
+  final String? refinerModel;
+  final double upscaleFactor;
+  final int refinerSteps;
+
+  // ControlNet parameters
+  final String? controlNetImage;  // Base64 or URL
+  final String? controlNetModel;
+  final double controlNetStrength;
+
+  // Advanced model addons
+  final String? vae;
+  final String? textEncoder;
+  final String? precision;
+
   const GenerationParams({
     this.prompt = '',
     this.negativePrompt = '',
@@ -343,6 +346,26 @@ class GenerationParams {
     this.frames = 81,
     this.fps = 24,
     this.videoFormat = 'webp',
+    // I2V defaults
+    this.videoAugmentationLevel = 0.15,  // LTX default
+    // Variation seed defaults
+    this.variationSeed,
+    this.variationStrength = 0.0,
+    // Init image defaults
+    this.initImage,
+    this.initImageCreativity = 0.6,
+    // Refine/Upscale defaults
+    this.refinerModel,
+    this.upscaleFactor = 1.0,
+    this.refinerSteps = 20,
+    // ControlNet defaults
+    this.controlNetImage,
+    this.controlNetModel,
+    this.controlNetStrength = 1.0,
+    // Advanced model addons defaults
+    this.vae,
+    this.textEncoder,
+    this.precision,
   });
 
   GenerationParams copyWith({
@@ -366,6 +389,26 @@ class GenerationParams {
     int? frames,
     int? fps,
     String? videoFormat,
+    // I2V params
+    double? videoAugmentationLevel,
+    // Variation seed params
+    int? variationSeed,
+    double? variationStrength,
+    // Init image params
+    String? initImage,
+    double? initImageCreativity,
+    // Refine/Upscale params
+    String? refinerModel,
+    double? upscaleFactor,
+    int? refinerSteps,
+    // ControlNet params
+    String? controlNetImage,
+    String? controlNetModel,
+    double? controlNetStrength,
+    // Advanced model addons
+    String? vae,
+    String? textEncoder,
+    String? precision,
   }) {
     return GenerationParams(
       prompt: prompt ?? this.prompt,
@@ -388,6 +431,26 @@ class GenerationParams {
       frames: frames ?? this.frames,
       fps: fps ?? this.fps,
       videoFormat: videoFormat ?? this.videoFormat,
+      // I2V
+      videoAugmentationLevel: videoAugmentationLevel ?? this.videoAugmentationLevel,
+      // Variation seed
+      variationSeed: variationSeed ?? this.variationSeed,
+      variationStrength: variationStrength ?? this.variationStrength,
+      // Init image
+      initImage: initImage ?? this.initImage,
+      initImageCreativity: initImageCreativity ?? this.initImageCreativity,
+      // Refine/Upscale
+      refinerModel: refinerModel ?? this.refinerModel,
+      upscaleFactor: upscaleFactor ?? this.upscaleFactor,
+      refinerSteps: refinerSteps ?? this.refinerSteps,
+      // ControlNet
+      controlNetImage: controlNetImage ?? this.controlNetImage,
+      controlNetModel: controlNetModel ?? this.controlNetModel,
+      controlNetStrength: controlNetStrength ?? this.controlNetStrength,
+      // Advanced model addons
+      vae: vae ?? this.vae,
+      textEncoder: textEncoder ?? this.textEncoder,
+      precision: precision ?? this.precision,
     );
   }
 }
@@ -475,6 +538,68 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
     state = state.copyWith(videoFormat: value);
   }
 
+  // I2V parameter setters
+  void setVideoAugmentationLevel(double value) {
+    state = state.copyWith(videoAugmentationLevel: value);
+  }
+
+  // Variation seed setters
+  void setVariationSeed(int? value) {
+    state = state.copyWith(variationSeed: value);
+  }
+
+  void setVariationStrength(double value) {
+    state = state.copyWith(variationStrength: value);
+  }
+
+  // Init image setters
+  void setInitImage(String? value) {
+    state = state.copyWith(initImage: value);
+  }
+
+  void setInitImageCreativity(double value) {
+    state = state.copyWith(initImageCreativity: value);
+  }
+
+  // Refine/Upscale setters
+  void setRefinerModel(String? value) {
+    state = state.copyWith(refinerModel: value);
+  }
+
+  void setUpscaleFactor(double value) {
+    state = state.copyWith(upscaleFactor: value);
+  }
+
+  void setRefinerSteps(int value) {
+    state = state.copyWith(refinerSteps: value);
+  }
+
+  // ControlNet setters
+  void setControlNetImage(String? value) {
+    state = state.copyWith(controlNetImage: value);
+  }
+
+  void setControlNetModel(String? value) {
+    state = state.copyWith(controlNetModel: value);
+  }
+
+  void setControlNetStrength(double value) {
+    state = state.copyWith(controlNetStrength: value);
+  }
+
+  // Advanced model addon setters
+  void setVae(String? value) {
+    state = state.copyWith(vae: value);
+  }
+
+  void setTextEncoder(String? value) {
+    state = state.copyWith(textEncoder: value);
+  }
+
+  void setPrecision(String? value) {
+    state = state.copyWith(precision: value);
+  }
+
   /// Apply LTX-2 optimized defaults
   void applyLTX2Defaults() {
     state = state.copyWith(
@@ -496,21 +621,51 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
     print('DEBUG applyModelDefaults: modelName=$modelName');
 
     final name = modelName.toLowerCase();
-    if (name.contains('ltx')) {
+    if (name.contains('ltx2')) {
+      // LTX-2: steps=25, cfg=3, frames=121, fps=24
       print('DEBUG: Applying LTX-2 defaults');
       state = state.copyWith(
         width: 768,
         height: 512,
         cfgScale: 3.0,
-        steps: 20,
+        steps: 25,
         frames: 121,
         fps: 24,
         videoMode: true,
-        videoModel: modelName,  // Set videoModel to the selected model
+        videoModel: modelName,
         videoFormat: 'mp4',
         sampler: 'euler_ancestral',
       );
+    } else if (name.contains('ltx')) {
+      // LTX/LTX2: steps=25, cfg=3, frames=97, fps=24
+      print('DEBUG: Applying LTX defaults');
+      state = state.copyWith(
+        width: 768,
+        height: 512,
+        cfgScale: 3.0,
+        steps: 25,
+        frames: 97,
+        fps: 24,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'mp4',
+        sampler: 'euler_ancestral',
+      );
+    } else if (name.contains('fvlv') || name.contains('frameshift')) {
+      print('DEBUG: Applying FVLV/Frameshift defaults');
+      state = state.copyWith(
+        width: 848,
+        height: 480,
+        cfgScale: 5.0,
+        steps: 30,
+        frames: 49,
+        fps: 24,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'mp4',
+      );
     } else if (name.contains('wan')) {
+      // Wan: steps=20, cfg=5, frames=81, fps=16
       print('DEBUG: Applying Wan defaults');
       state = state.copyWith(
         width: 832,
@@ -524,26 +679,28 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
         videoFormat: 'webp',
       );
     } else if (name.contains('hunyuan') && name.contains('video')) {
+      // Hunyuan Video: steps=30, cfg=6, frames=49, fps=24
       print('DEBUG: Applying Hunyuan Video defaults');
       state = state.copyWith(
         width: 848,
         height: 480,
         cfgScale: 6.0,
         steps: 30,
-        frames: 45,
+        frames: 49,
         fps: 24,
         videoMode: true,
         videoModel: modelName,
         videoFormat: 'mp4',
       );
     } else if (name.contains('mochi')) {
+      // Mochi: steps=30, cfg=4.5, frames=84, fps=24
       print('DEBUG: Applying Mochi defaults');
       state = state.copyWith(
         width: 848,
         height: 480,
         cfgScale: 4.5,
-        steps: 50,
-        frames: 37,
+        steps: 30,
+        frames: 84,
         fps: 24,
         videoMode: true,
         videoModel: modelName,
@@ -576,17 +733,74 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
         videoModel: modelName,
         videoFormat: 'webp',
       );
-    } else {
-      print('DEBUG: Applying image model defaults');
+    } else if (name.contains('hidream')) {
+      // HiDream: steps=28, cfg=5, resolution=1024x1024
+      print('DEBUG: Applying HiDream defaults');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: 5.0,
+        steps: 28,
+      );
+    } else if (name.contains('chroma')) {
+      // Chroma: steps=25, cfg=4, resolution=1024x1024
+      print('DEBUG: Applying Chroma defaults');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: 4.0,
+        steps: 25,
+      );
+    } else if (name.contains('flux')) {
+      // Flux: steps=20, cfg=1.0, resolution=1024x1024
+      print('DEBUG: Applying Flux defaults');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: 1.0,
+        steps: 20,
+      );
+    } else if (name.contains('sdxl') || name.contains('sd_xl') || name.contains('stable-diffusion-xl')) {
+      // SDXL: steps=25, cfg=7, resolution=1024x1024
+      print('DEBUG: Applying SDXL defaults');
       state = state.copyWith(
         videoMode: false,
         videoModel: null,
         width: 1024,
         height: 1024,
         cfgScale: 7.0,
+        steps: 25,
+      );
+    } else if (name.contains('sd15') || name.contains('sd_15') || name.contains('sd1.5') || name.contains('v1-5') || name.contains('1.5')) {
+      // SD 1.5: steps=20, cfg=7, resolution=512x512
+      print('DEBUG: Applying SD 1.5 defaults');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 512,
+        height: 512,
+        cfgScale: 7.0,
+        steps: 20,
+      );
+    } else {
+      // Default fallback for unknown image models (SDXL-like defaults)
+      print('DEBUG: Applying default image model settings');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: 7.0,
+        steps: 25,
       );
     }
-    print('DEBUG: New state - videoMode=${state.videoMode}, videoModel=${state.videoModel}, cfgScale=${state.cfgScale}, width=${state.width}');
+    print('DEBUG: New state - videoMode=${state.videoMode}, videoModel=${state.videoModel}, cfgScale=${state.cfgScale}, width=${state.width}, steps=${state.steps}');
   }
 
   /// Apply parameters from image metadata (for reuse functionality)

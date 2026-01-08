@@ -118,7 +118,7 @@ class _PromptBarState extends ConsumerState<PromptBar> {
           // Bottom row: Model selector + Generate button
           Row(
             children: [
-              // Model selector
+              // Model selector with refresh
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
@@ -130,6 +130,8 @@ class _PromptBarState extends ConsumerState<PromptBar> {
                   children: [
                     Text('Model: ', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
                     _ModelDropdown(),
+                    const SizedBox(width: 4),
+                    _RefreshModelsButton(),
                   ],
                 ),
               ),
@@ -222,6 +224,32 @@ class _ModelDropdown extends ConsumerWidget {
         ref.read(generationParamsProvider.notifier).setModel(value);
         ref.read(generationParamsProvider.notifier).applyModelDefaults(value);
       },
+    );
+  }
+}
+
+/// Refresh models button
+class _RefreshModelsButton extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final modelsState = ref.watch(modelsProvider);
+
+    return IconButton(
+      icon: modelsState.isLoading
+          ? SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary),
+            )
+          : Icon(Icons.refresh, size: 16, color: colorScheme.primary),
+      onPressed: modelsState.isLoading
+          ? null
+          : () => ref.read(modelsProvider.notifier).refresh(),
+      tooltip: 'Refresh models',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(),
+      visualDensity: VisualDensity.compact,
     );
   }
 }

@@ -18,7 +18,7 @@ class ConnectionInfo {
 
   const ConnectionInfo({
     this.host = 'localhost',
-    this.port = 7802,
+    this.port = 7803,
     this.state = ApiConnectionState.disconnected,
     this.errorMessage,
   });
@@ -69,7 +69,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionInfo> {
   /// Load saved connection settings
   Future<void> _loadSavedConnection() async {
     final host = StorageService.getStringStatic('backend_host') ?? 'localhost';
-    final port = StorageService.getInt('backend_port') ?? 7802;
+    final port = StorageService.getInt('backend_port') ?? 7803;
 
     state = state.copyWith(host: host, port: port);
     _apiService.configure(host: host, port: port);

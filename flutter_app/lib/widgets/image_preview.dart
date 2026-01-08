@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:media_kit/media_kit.dart';
@@ -12,6 +14,26 @@ bool isVideoUrl(String? url) {
   return lower.contains('.mp4') || lower.contains('.webm') ||
          lower.contains('.mov') || lower.contains('.avi') ||
          lower.contains('.mkv');
+}
+
+/// Check if URL is a base64 data URL (from WebSocket preview)
+bool isBase64DataUrl(String? url) {
+  if (url == null) return false;
+  return url.startsWith('data:image/');
+}
+
+/// Decode base64 data URL to bytes
+Uint8List? decodeBase64DataUrl(String dataUrl) {
+  try {
+    // Format: data:image/jpeg;base64,/9j/4AAQSkZJ...
+    final parts = dataUrl.split(',');
+    if (parts.length == 2) {
+      return base64Decode(parts[1]);
+    }
+  } catch (e) {
+    print('Failed to decode base64 image: $e');
+  }
+  return null;
 }
 
 /// Image preview widget with loading and error states
@@ -213,16 +235,14 @@ class _GenerationPreviewState extends State<GenerationPreview> {
         // Video, Image or placeholder
         if (widget.imageUrl != null && widget.imageUrl!.isNotEmpty)
           if (isVideo && _videoController != null)
-            // Embedded video player
+            // Embedded video player - uses fit to maintain native aspect ratio
             Container(
               color: Colors.black,
               child: Center(
-                child: AspectRatio(
-                  aspectRatio: 16 / 9,
-                  child: Video(
-                    controller: _videoController!,
-                    controls: MaterialVideoControls,
-                  ),
+                child: Video(
+                  controller: _videoController!,
+                  controls: MaterialVideoControls,
+                  fit: BoxFit.contain,
                 ),
               ),
             )

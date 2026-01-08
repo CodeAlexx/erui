@@ -18,13 +18,16 @@ void main(List<String> args) async {
   final trainerUrl = _getArg(args, 'trainer-url', 'http://localhost:8000');
   // Output directory - points to ComfyUI output folder
   final outputDir = _getArg(args, 'output-dir', '/home/alex/eriui/comfyui/ComfyUI/output');
+  // Models directory - points to ComfyUI models folder
+  final modelsDir = _getArg(args, 'models-dir', '/home/alex/eriui/comfyui/ComfyUI/models');
 
   print('Starting EriUI Server (Standalone Mode)...');
   print('ComfyUI backend: $comfyUrl');
   print('OneTrainer backend: $trainerUrl');
   print('Output directory: $outputDir');
+  print('Models directory: $modelsDir');
 
-  final comfy = ComfyUIProxy(comfyUrl);
+  final comfy = ComfyUIProxy(comfyUrl, modelsDir: modelsDir);
   final trainer = OneTrainerProxy(trainerUrl);
   final api = EriUIApi(comfy, trainer, outputDir: outputDir);
 
@@ -54,12 +57,17 @@ String _getArg(List<String> args, String name, String defaultValue) {
 
 class ComfyUIProxy {
   final String baseUrl;
+  final String modelsDir;
   final Dio _dio;
   WebSocketChannel? _ws;
   String? _clientId;
   final _completions = <String, Completer<Map<String, dynamic>>>{};
 
-  ComfyUIProxy(this.baseUrl) : _dio = Dio(BaseOptions(baseUrl: baseUrl));
+  // Supported model extensions (like SwarmUI)
+  static const supportedExtensions = ['safetensors', 'sft', 'gguf', 'ckpt', 'pt', 'pth', 'bin'];
+
+  ComfyUIProxy(this.baseUrl, {this.modelsDir = '/home/alex/eriui/comfyui/ComfyUI/models'})
+      : _dio = Dio(BaseOptions(baseUrl: baseUrl));
 
   String get clientId => _clientId ??= const Uuid().v4();
 
@@ -77,60 +85,95 @@ class ComfyUIProxy {
     return resp.data as Map<String, dynamic>;
   }
 
+  /// Scan a folder for model files (like SwarmUI)
+  Future<List<String>> _scanModelFolder(String folderName, {int depth = 3}) async {
+    final models = <String>[];
+    final folder = Directory('$modelsDir/$folderName');
+
+    if (!await folder.exists()) {
+      print('Model folder not found: ${folder.path}');
+      return models;
+    }
+
+    Future<void> scanDir(Directory dir, String relativePath, int currentDepth) async {
+      if (currentDepth <= 0) return;
+
+      try {
+        await for (final entity in dir.list()) {
+          final name = entity.path.split('/').last;
+
+          // Skip hidden files/folders
+          if (name.startsWith('.')) continue;
+
+          if (entity is Directory) {
+            final newRelPath = relativePath.isEmpty ? name : '$relativePath/$name';
+            await scanDir(entity, newRelPath, currentDepth - 1);
+          } else if (entity is File) {
+            final ext = name.split('.').last.toLowerCase();
+            if (supportedExtensions.contains(ext)) {
+              final modelPath = relativePath.isEmpty ? name : '$relativePath/$name';
+              models.add(modelPath);
+            }
+          }
+        }
+      } catch (e) {
+        print('Error scanning $dir: $e');
+      }
+    }
+
+    await scanDir(folder, '', depth);
+    models.sort();
+    return models;
+  }
+
+  /// Get checkpoints from checkpoints folder (filesystem scan)
   Future<List<String>> getModels() async {
-    try {
-      final resp = await _dio.get('/object_info/CheckpointLoaderSimple');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['CheckpointLoaderSimple']?['input']?['required']?['ckpt_name'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        return (input[0] as List).map((e) => e.toString()).toList();
-      }
-    } catch (e) {
-      print('Error getting models: $e');
-    }
-    return [];
+    return _scanModelFolder('checkpoints');
   }
 
+  /// Get diffusion models from diffusion_models and unet folders (filesystem scan)
   Future<List<String>> getDiffusionModels() async {
-    try {
-      final resp = await _dio.get('/object_info/UNETLoader');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['UNETLoader']?['input']?['required']?['unet_name'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        return (input[0] as List).map((e) => e.toString()).toList();
-      }
-    } catch (e) {
-      print('Error getting diffusion models: $e');
+    final models = <String>[];
+    models.addAll(await _scanModelFolder('diffusion_models'));
+    // Also check unet folder (some models go there)
+    final unetModels = await _scanModelFolder('unet');
+    for (final m in unetModels) {
+      if (!models.contains(m)) models.add(m);
     }
-    return [];
+    models.sort();
+    return models;
   }
 
+  /// Get VAEs from vae folder (filesystem scan)
   Future<List<String>> getVAEs() async {
-    try {
-      final resp = await _dio.get('/object_info/VAELoader');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['VAELoader']?['input']?['required']?['vae_name'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        return (input[0] as List).map((e) => e.toString()).toList();
-      }
-    } catch (e) {
-      print('Error getting VAEs: $e');
-    }
-    return [];
+    return _scanModelFolder('vae');
   }
 
+  /// Get CLIP models from clip and text_encoders folders (filesystem scan)
   Future<List<String>> getCLIPs() async {
-    try {
-      final resp = await _dio.get('/object_info/DualCLIPLoader');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['DualCLIPLoader']?['input']?['required']?['clip_name1'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        return (input[0] as List).map((e) => e.toString()).toList();
-      }
-    } catch (e) {
-      print('Error getting CLIPs: $e');
+    final models = <String>[];
+    models.addAll(await _scanModelFolder('clip'));
+    final textEncoders = await _scanModelFolder('text_encoders');
+    for (final m in textEncoders) {
+      if (!models.contains(m)) models.add(m);
     }
-    return [];
+    models.sort();
+    return models;
+  }
+
+  /// Get LoRAs from loras folder (filesystem scan)
+  Future<List<String>> getLoRAs() async {
+    return _scanModelFolder('loras');
+  }
+
+  /// Get ControlNets from controlnet folder (filesystem scan)
+  Future<List<String>> getControlNets() async {
+    return _scanModelFolder('controlnet');
+  }
+
+  /// Get Embeddings from embeddings folder (filesystem scan)
+  Future<List<String>> getEmbeddings() async {
+    return _scanModelFolder('embeddings');
   }
 
   Future<List<String>> getSamplers() async {
@@ -1262,23 +1305,90 @@ class EriUIApi {
     }
   }
 
+  /// Detect model architecture from filename patterns
+  String _detectArchitecture(String modelName) {
+    final name = modelName.toLowerCase();
+
+    // Video models
+    if (name.contains('wan2') || name.contains('wan_')) return 'wan';
+    if (name.contains('ltx-2') || name.contains('ltx2')) return 'ltx2';
+    if (name.contains('ltx')) return 'ltx';
+    if (name.contains('hunyuan') && name.contains('video')) return 'hunyuan_video';
+    if (name.contains('mochi')) return 'mochi';
+    if (name.contains('kandinsky')) return 'kandinsky';
+    if (name.contains('svd') || name.contains('stable_video')) return 'svd';
+
+    // Flux models
+    if (name.contains('flux')) return 'flux';
+
+    // SD3 models
+    if (name.contains('sd3.5') || name.contains('sd35')) return 'sd35';
+    if (name.contains('sd3') || name.contains('stable.*diffusion.*3')) return 'sd3';
+
+    // Lumina/Z-Image models
+    if (name.contains('z_image') || name.contains('lumina')) return 'lumina2';
+
+    // SDXL-based models (including fine-tunes like Pony, Illustrious, etc.)
+    if (name.contains('sdxl') || name.contains('sd_xl') || name.contains('xl_base') ||
+        name.contains('pony') || name.contains('illustrious') || name.contains('juggernaut') ||
+        name.contains('zonkey') || name.contains('animagine') || name.contains('kohaku') ||
+        name.contains('realism') && !name.contains('sd15') ||
+        name.contains('1024') || name.contains('dreamshaperxl') ||
+        name.contains('copax') || name.contains('cyberrealistic')) return 'sdxl';
+
+    // SD 1.5 models
+    if (name.contains('sd15') || name.contains('sd_15') || name.contains('sd1.5') ||
+        name.contains('v1-5') || name.contains('512') ||
+        name.contains('realistic_vision') || name.contains('dreamshaper') && !name.contains('xl')) return 'sd15';
+
+    // SD 2.x models
+    if (name.contains('sd2') || name.contains('sd_2') || name.contains('768')) return 'sd2';
+
+    // Default to SDXL for unknown checkpoints (most common now)
+    return 'sdxl';
+  }
+
+  /// Get default resolution for architecture
+  Map<String, int> _getDefaultResolution(String arch) {
+    switch (arch) {
+      case 'sd15': return {'width': 512, 'height': 512};
+      case 'sd2': return {'width': 768, 'height': 768};
+      case 'sdxl': return {'width': 1024, 'height': 1024};
+      case 'sd3': case 'sd35': return {'width': 1024, 'height': 1024};
+      case 'flux': return {'width': 1024, 'height': 1024};
+      case 'lumina2': return {'width': 1024, 'height': 1024};
+      case 'wan': return {'width': 832, 'height': 480};
+      case 'ltx': case 'ltx2': return {'width': 768, 'height': 512};
+      case 'hunyuan_video': return {'width': 848, 'height': 480};
+      case 'mochi': return {'width': 848, 'height': 480};
+      default: return {'width': 1024, 'height': 1024};
+    }
+  }
+
   Future<Map<String, dynamic>> _listCheckpoints() async {
     List<Map<String, dynamic>> allFiles = [];
 
     // Regular checkpoints
     final checkpoints = await comfy.getModels();
-    allFiles.addAll(checkpoints.map((m) => {
-      'name': m,
-      'path': m,
-      'type': 'checkpoint',
-      'title': m.replaceAll('.safetensors', '').replaceAll('.ckpt', ''),
-      'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(m)}&type=Stable-Diffusion',
+    allFiles.addAll(checkpoints.map((m) {
+      final arch = _detectArchitecture(m);
+      final res = _getDefaultResolution(arch);
+      return {
+        'name': m,
+        'path': m,
+        'type': 'checkpoint',
+        'title': m.replaceAll('.safetensors', '').replaceAll('.ckpt', ''),
+        'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(m)}&type=Stable-Diffusion',
+        'architecture': arch,
+        'standard_width': res['width'],
+        'standard_height': res['height'],
+      };
     }));
 
-    // Diffusion models (z_image/Lumina2)
+    // Diffusion models (z_image/Lumina2) that work as image models
     final diffModels = await comfy.getDiffusionModels();
     for (final m in diffModels) {
-      // Only add z_image models (Lumina2 compatible)
+      // Only add z_image/Lumina2 models (image-capable)
       if (m.contains('z_image')) {
         allFiles.add({
           'name': m,
@@ -1286,6 +1396,9 @@ class EriUIApi {
           'type': 'diffusion_model',
           'title': '[Lumina2] ${m.replaceAll('.safetensors', '')}',
           'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(m)}&type=diffusion_models',
+          'architecture': 'lumina2',
+          'standard_width': 1024,
+          'standard_height': 1024,
         });
       }
     }
@@ -1297,40 +1410,44 @@ class EriUIApi {
   }
 
   Future<Map<String, dynamic>> _listLorasWithPreviews() async {
-    try {
-      final resp = await comfy._dio.get('/object_info/LoraLoader');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['LoraLoader']?['input']?['required']?['lora_name'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        final loras = (input[0] as List).map((e) => e.toString()).toList();
-        final files = loras.map((l) => {
-          'name': l,
-          'path': l,
-          'type': 'lora',
-          'title': l.replaceAll('.safetensors', ''),
-          'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(l)}&type=Lora',
-        }).toList();
-        return {'files': files, 'loras': files};
-      }
-    } catch (e) {
-      print('Error getting loras: $e');
-    }
-    return {'files': [], 'loras': []};
+    // Use filesystem scanning
+    final loras = await comfy.getLoRAs();
+    final files = loras.map((l) => {
+      'name': l,
+      'path': l,
+      'type': 'lora',
+      'title': l.replaceAll('.safetensors', ''),
+      'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(l)}&type=Lora',
+    }).toList();
+    return {'files': files, 'loras': files};
   }
 
   Future<Map<String, dynamic>> _listCLIPs() async {
+    // Use filesystem scanning
     final clips = await comfy.getCLIPs();
     final files = clips.map((c) => {
       'name': c,
       'path': c,
       'type': 'clip',
-      'title': c.replaceAll('.safetensors', ''),
+      'title': c.replaceAll('.safetensors', '').replaceAll('.gguf', ''),
       'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(c)}&type=clip',
     }).toList();
     return {'files': files};
   }
 
   Future<Map<String, dynamic>> _listEmbeddings() async {
+    // Use filesystem scanning
+    final embeddings = await comfy.getEmbeddings();
+    final files = embeddings.map((e) => {
+      'name': e,
+      'path': e,
+      'type': 'embedding',
+      'title': e.replaceAll('.safetensors', '').replaceAll('.pt', ''),
+    }).toList();
+    return {'files': files};
+  }
+
+  Future<Map<String, dynamic>> _listEmbeddingsOld() async {
     try {
       final resp = await comfy._dio.get('/embeddings');
       if (resp.data is List) {
@@ -1350,36 +1467,35 @@ class EriUIApi {
   }
 
   Future<Map<String, dynamic>> _listControlNets() async {
-    try {
-      final resp = await comfy._dio.get('/object_info/ControlNetLoader');
-      final data = resp.data as Map<String, dynamic>;
-      final input = data['ControlNetLoader']?['input']?['required']?['control_net_name'];
-      if (input is List && input.isNotEmpty && input[0] is List) {
-        final controlnets = (input[0] as List).map((e) => e.toString()).toList();
-        final files = controlnets.map((c) => {
-          'name': c,
-          'path': c,
-          'type': 'controlnet',
-          'title': c.replaceAll('.safetensors', ''),
-          'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(c)}&type=ControlNet',
-        }).toList();
-        return {'files': files};
-      }
-    } catch (e) {
-      print('Error getting controlnets: $e');
-    }
-    return {'files': []};
+    // Use filesystem scanning
+    final controlnets = await comfy.getControlNets();
+    final files = controlnets.map((c) => {
+      'name': c,
+      'path': c,
+      'type': 'controlnet',
+      'title': c.replaceAll('.safetensors', ''),
+      'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(c)}&type=ControlNet',
+    }).toList();
+    return {'files': files};
   }
 
   Future<Map<String, dynamic>> _listDiffusionModels() async {
     final models = await comfy.getDiffusionModels();
-    final files = models.map((m) => {
-      'name': m,
-      'path': m,
-      'type': 'diffusion_model',
-      'title': m.replaceAll('.safetensors', ''),
+    final files = models.map((m) {
+      final arch = _detectArchitecture(m);
+      final res = _getDefaultResolution(arch);
+      return {
+        'name': m,
+        'path': m,
+        'type': 'diffusion_model',
+        'title': m.replaceAll('.safetensors', '').replaceAll('.gguf', ''),
+        'preview_image': '/API/GetModelPreview?model=${Uri.encodeComponent(m)}&type=diffusion_models',
+        'architecture': arch,
+        'standard_width': res['width'],
+        'standard_height': res['height'],
+      };
     }).toList();
-    return {'files': files};
+    return {'files': files, 'models': files};
   }
 
   Future<Map<String, dynamic>> _listVAEs() async {
@@ -1994,16 +2110,62 @@ class EriUIApi {
     final modelName = request.url.queryParameters['model'] ?? '';
     final modelType = request.url.queryParameters['type'] ?? 'Stable-Diffusion';
 
-    // Check for local preview image first
-    final previewPath = '$outputDir/previews/${modelType.toLowerCase()}/${modelName.replaceAll('.safetensors', '.jpg')}';
-    final previewFile = File(previewPath);
-    if (await previewFile.exists()) {
-      final bytes = await previewFile.readAsBytes();
-      return Response.ok(bytes, headers: {'Content-Type': 'image/jpeg'});
+    // Map model type to folder name
+    final folderMap = {
+      'stable-diffusion': 'checkpoints',
+      'lora': 'loras',
+      'vae': 'vae',
+      'controlnet': 'controlnet',
+      'clip': 'clip',
+      'embedding': 'embeddings',
+      'diffusion_models': 'diffusion_models',
+    };
+    final folder = folderMap[modelType.toLowerCase()] ?? 'checkpoints';
+
+    // Get model base name (without extension)
+    final baseName = modelName
+        .replaceAll('.safetensors', '')
+        .replaceAll('.ckpt', '')
+        .replaceAll('.gguf', '')
+        .replaceAll('.pt', '');
+    final modelDir = '${comfy.modelsDir}/$folder';
+
+    // Preview image patterns to search (like SwarmUI)
+    final previewSuffixes = ['.jpg', '.png', '.preview.png', '.preview.jpg', '.jpeg', '.preview.jpeg', '.thumb.jpg', '.thumb.png', '.webp'];
+
+    // Search for preview image next to model file
+    for (final suffix in previewSuffixes) {
+      final previewPath = '$modelDir/$baseName$suffix';
+      final previewFile = File(previewPath);
+      if (await previewFile.exists()) {
+        final bytes = await previewFile.readAsBytes();
+        final contentType = suffix.contains('.png') ? 'image/png'
+            : suffix.contains('.webp') ? 'image/webp'
+            : 'image/jpeg';
+        return Response.ok(bytes, headers: {'Content-Type': contentType});
+      }
     }
 
-    // Return styled placeholder SVG (standalone - no SwarmUI dependency)
-    final displayName = modelName.replaceAll('.safetensors', '').replaceAll('.ckpt', '');
+    // Also check if model is in a subfolder (e.g., OfficialStableDiffusion/model.safetensors)
+    if (modelName.contains('/')) {
+      final parts = modelName.split('/');
+      final subBaseName = parts.last.replaceAll('.safetensors', '').replaceAll('.ckpt', '').replaceAll('.gguf', '');
+      final subFolder = parts.sublist(0, parts.length - 1).join('/');
+      for (final suffix in previewSuffixes) {
+        final previewPath = '$modelDir/$subFolder/$subBaseName$suffix';
+        final previewFile = File(previewPath);
+        if (await previewFile.exists()) {
+          final bytes = await previewFile.readAsBytes();
+          final contentType = suffix.contains('.png') ? 'image/png'
+              : suffix.contains('.webp') ? 'image/webp'
+              : 'image/jpeg';
+          return Response.ok(bytes, headers: {'Content-Type': contentType});
+        }
+      }
+    }
+
+    // Return styled placeholder SVG if no preview found
+    final displayName = baseName.split('/').last;
     final shortName = displayName.length > 12 ? '${displayName.substring(0, 12)}...' : displayName;
     final placeholder = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
       <rect fill="#1a1a2e" width="100" height="100"/>

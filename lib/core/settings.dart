@@ -154,6 +154,7 @@ class PathSettings {
   int downloadToRootID = 0;
   String sdModelFolder = 'Stable-Diffusion';
   String sdLoraFolder = 'Lora';
+  String sdLycorisFolder = 'LyCORIS';
   String sdVAEFolder = 'VAE';
   String sdEmbeddingFolder = 'Embeddings';
   String sdControlNetsFolder = 'controlnet';
@@ -177,6 +178,7 @@ class PathSettings {
     p.downloadToRootID = data['DownloadToRootID'] as int? ?? 0;
     p.sdModelFolder = data['SDModelFolder']?.toString() ?? 'Stable-Diffusion';
     p.sdLoraFolder = data['SDLoraFolder']?.toString() ?? 'Lora';
+    p.sdLycorisFolder = data['SDLycorisFolder']?.toString() ?? 'LyCORIS';
     p.sdVAEFolder = data['SDVAEFolder']?.toString() ?? 'VAE';
     p.sdEmbeddingFolder = data['SDEmbeddingFolder']?.toString() ?? 'Embeddings';
     p.sdControlNetsFolder = data['SDControlNetsFolder']?.toString() ?? 'controlnet';
@@ -200,6 +202,7 @@ class PathSettings {
       'DownloadToRootID': downloadToRootID,
       'SDModelFolder': sdModelFolder,
       'SDLoraFolder': sdLoraFolder,
+      'SDLycorisFolder': sdLycorisFolder,
       'SDVAEFolder': sdVAEFolder,
       'SDEmbeddingFolder': sdEmbeddingFolder,
       'SDControlNetsFolder': sdControlNetsFolder,

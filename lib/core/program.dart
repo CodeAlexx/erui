@@ -247,6 +247,11 @@ class Program {
       folderPaths: _resolveModelPaths(modelRoot, paths.sdLoraFolder),
     );
 
+    t2iModelSets['LyCORIS'] = T2IModelHandler(
+      modelType: 'LyCORIS',
+      folderPaths: _resolveModelPaths(modelRoot, paths.sdLycorisFolder),
+    );
+
     t2iModelSets['Embedding'] = T2IModelHandler(
       modelType: 'Embedding',
       folderPaths: _resolveModelPaths(modelRoot, paths.sdEmbeddingFolder),

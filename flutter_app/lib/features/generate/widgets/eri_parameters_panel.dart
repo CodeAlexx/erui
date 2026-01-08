@@ -888,6 +888,8 @@ class _VariationSeedContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -900,6 +902,9 @@ class _VariationSeedContent extends ConsumerWidget {
             SizedBox(
               width: 100,
               child: TextField(
+                controller: TextEditingController(
+                  text: params.variationSeed?.toString() ?? '-1',
+                ),
                 decoration: InputDecoration(
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -909,6 +914,10 @@ class _VariationSeedContent extends ConsumerWidget {
                 style: const TextStyle(fontSize: 11),
                 keyboardType: TextInputType.number,
                 textAlign: TextAlign.center,
+                onSubmitted: (v) {
+                  final parsed = int.tryParse(v);
+                  paramsNotifier.setVariationSeed(parsed == -1 ? null : parsed);
+                },
               ),
             ),
           ],
@@ -917,12 +926,12 @@ class _VariationSeedContent extends ConsumerWidget {
         // Variation Strength slider
         _ParameterSlider(
           label: 'Strength',
-          value: 0.0,
+          value: params.variationStrength,
           min: 0,
           max: 1,
           divisions: 20,
           decimals: 2,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setVariationStrength(v),
         ),
       ],
     );
@@ -938,11 +947,14 @@ class _InitImageContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+    final hasImage = params.initImage != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Image drop zone
+        // Image drop zone / preview
         Container(
           height: 80,
           width: double.infinity,
@@ -950,31 +962,51 @@ class _InitImageContent extends ConsumerWidget {
             color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
             borderRadius: BorderRadius.circular(4),
             border: Border.all(
-              color: colorScheme.outlineVariant,
+              color: hasImage ? colorScheme.primary : colorScheme.outlineVariant,
               style: BorderStyle.solid,
             ),
           ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_photo_alternate, size: 24, color: colorScheme.onSurfaceVariant),
-                const SizedBox(height: 4),
-                Text('Drop image or click', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
-              ],
-            ),
-          ),
+          child: hasImage
+              ? Stack(
+                  children: [
+                    Center(
+                      child: Text('Image set', style: TextStyle(fontSize: 11, color: colorScheme.primary)),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: IconButton(
+                        icon: Icon(Icons.close, size: 16, color: colorScheme.error),
+                        onPressed: () => paramsNotifier.setInitImage(null),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Clear image',
+                      ),
+                    ),
+                  ],
+                )
+              : Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_photo_alternate, size: 24, color: colorScheme.onSurfaceVariant),
+                      const SizedBox(height: 4),
+                      Text('Drop image or click', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+                      Text('(File picker coming soon)', style: TextStyle(fontSize: 9, color: colorScheme.onSurfaceVariant.withOpacity(0.6))),
+                    ],
+                  ),
+                ),
         ),
         const SizedBox(height: 8),
         // Creativity slider (denoising strength)
         _ParameterSlider(
           label: 'Creativity',
-          value: 0.6,
+          value: params.initImageCreativity,
           min: 0,
           max: 1,
           divisions: 20,
           decimals: 2,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setInitImageCreativity(v),
         ),
       ],
     );
@@ -989,7 +1021,8 @@ class _RefineUpscaleContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
     final modelsState = ref.watch(modelsProvider);
     final refiners = modelsState.checkpoints.where((m) =>
       m.name.toLowerCase().contains('refiner') ||
@@ -1002,30 +1035,30 @@ class _RefineUpscaleContent extends ConsumerWidget {
         // Refiner model dropdown
         _ParameterDropdown(
           label: 'Refiner Model',
-          value: 'None',
+          value: params.refinerModel ?? 'None',
           items: ['None', ...refiners.map((m) => m.displayName)],
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setRefinerModel(v == 'None' ? null : v),
         ),
         const SizedBox(height: 8),
         // Upscale factor
         _ParameterSlider(
           label: 'Upscale',
-          value: 1.0,
+          value: params.upscaleFactor,
           min: 1,
           max: 4,
           divisions: 12,
           decimals: 1,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setUpscaleFactor(v),
         ),
         const SizedBox(height: 8),
         // Refiner steps
         _ParameterSlider(
           label: 'Steps',
-          value: 20,
+          value: params.refinerSteps.toDouble(),
           min: 1,
           max: 100,
           divisions: 99,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setRefinerSteps(v.round()),
         ),
       ],
     );
@@ -1041,50 +1074,72 @@ class _ControlNetContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
     final modelsState = ref.watch(modelsProvider);
     final controlnets = modelsState.controlnets;
+    final hasImage = params.controlNetImage != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Image drop zone
+        // Image drop zone / preview
         Container(
           height: 60,
           width: double.infinity,
           decoration: BoxDecoration(
             color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: colorScheme.outlineVariant),
+            border: Border.all(color: hasImage ? colorScheme.primary : colorScheme.outlineVariant),
           ),
-          child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_photo_alternate, size: 20, color: colorScheme.onSurfaceVariant),
-                const SizedBox(width: 8),
-                Text('Drop control image', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
-              ],
-            ),
-          ),
+          child: hasImage
+              ? Stack(
+                  children: [
+                    Center(
+                      child: Text('Control image set', style: TextStyle(fontSize: 10, color: colorScheme.primary)),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: IconButton(
+                        icon: Icon(Icons.close, size: 14, color: colorScheme.error),
+                        onPressed: () => paramsNotifier.setControlNetImage(null),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Clear image',
+                      ),
+                    ),
+                  ],
+                )
+              : Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_photo_alternate, size: 20, color: colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      Text('Drop control image', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
         ),
         const SizedBox(height: 8),
         // ControlNet model dropdown
         _ParameterDropdown(
           label: 'Model',
-          value: 'None',
+          value: params.controlNetModel ?? 'None',
           items: ['None', ...controlnets.map((m) => m.displayName)],
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setControlNetModel(v == 'None' ? null : v),
         ),
         const SizedBox(height: 8),
         // Strength slider
         _ParameterSlider(
           label: 'Strength',
-          value: 1.0,
+          value: params.controlNetStrength,
           min: 0,
           max: 2,
           divisions: 40,
           decimals: 2,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setControlNetStrength(v),
         ),
       ],
     );
@@ -1130,9 +1185,14 @@ class _ImageToVideoContent extends ConsumerWidget {
     // Main model list: Wan high_noise + other video models
     final mainVideoModels = [...wanHighNoiseModels, ...otherVideoModels];
 
-    // Check if current model is Wan (needs dual models)
+    // Check if current model is Wan (needs dual models) or LTX
     final currentModel = params.videoModel?.toLowerCase() ?? '';
     final isWanModel = currentModel.contains('wan');
+    final isLTXModel = currentModel.contains('ltx');
+
+    // Check if init image is set (I2V mode for LTX)
+    final hasInitImage = params.initImage != null && params.initImage!.isNotEmpty;
+    final isLTXI2V = isLTXModel && hasInitImage;
 
     // Enable video mode when this section is expanded
     if (enabled && !params.videoMode) {
@@ -1156,11 +1216,20 @@ class _ImageToVideoContent extends ConsumerWidget {
     }
 
     // Determine current model type for display
-    final isT2V = currentModel.contains('t2v') ||
-                  (!currentModel.contains('i2v') && !currentModel.contains('svd'));
-    final modelType = isWanModel
-        ? (isT2V ? 'Wan T2V (dual model)' : 'Wan I2V (dual model)')
-        : (isT2V ? 'Text→Video' : 'Image→Video');
+    // For LTX models, T2V/I2V is determined by whether an init image is present
+    final isWanI2V = isWanModel && currentModel.contains('i2v');
+    final isT2V = isLTXModel
+        ? !hasInitImage  // LTX: T2V if no init image, I2V if has init image
+        : (currentModel.contains('t2v') || (!currentModel.contains('i2v') && !currentModel.contains('svd')));
+
+    String modelType;
+    if (isWanModel) {
+      modelType = isWanI2V ? 'Wan I2V (dual model)' : 'Wan T2V (dual model)';
+    } else if (isLTXModel) {
+      modelType = isLTXI2V ? 'LTX Image→Video' : 'LTX Text→Video';
+    } else {
+      modelType = isT2V ? 'Text→Video' : 'Image→Video';
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1170,36 +1239,83 @@ class _ImageToVideoContent extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           margin: const EdgeInsets.only(bottom: 8),
           decoration: BoxDecoration(
-            color: isWanModel ? Colors.orange.withOpacity(0.2) : (isT2V ? Colors.green.withOpacity(0.2) : Colors.blue.withOpacity(0.2)),
+            color: isWanModel
+                ? Colors.orange.withOpacity(0.2)
+                : isLTXI2V
+                    ? Colors.purple.withOpacity(0.2)
+                    : (isT2V ? Colors.green.withOpacity(0.2) : Colors.blue.withOpacity(0.2)),
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Text(
-            modelType,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              color: isWanModel ? Colors.orange : (isT2V ? Colors.green : Colors.blue),
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                modelType,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isWanModel
+                      ? Colors.orange
+                      : isLTXI2V
+                          ? Colors.purple
+                          : (isT2V ? Colors.green : Colors.blue),
+                ),
+              ),
+              if (isLTXModel && !hasInitImage) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Add an Init Image to switch to I2V mode',
+                  child: Icon(
+                    Icons.info_outline,
+                    size: 12,
+                    color: Colors.green.withOpacity(0.7),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
-        // Main Video model dropdown
-        _ParameterDropdown(
-          label: 'Video Model',
-          value: params.videoModel ?? (mainVideoModels.isNotEmpty ? mainVideoModels.first.name : 'None'),
-          items: mainVideoModels.isEmpty ? ['None'] : mainVideoModels.map((m) => m.name).toList(),
-          onChanged: (v) {
-            paramsNotifier.setVideoModel(v);
-            // Apply model-specific defaults (CFG, resolution, etc.)
-            paramsNotifier.applyModelDefaults(v);
-            // Auto-set high/low noise for Wan
-            if (v.toLowerCase().contains('wan') && v.contains('high_noise')) {
-              paramsNotifier.setHighNoiseModel(v);
-              paramsNotifier.setLowNoiseModel(v.replaceAll('high_noise', 'low_noise'));
-            } else {
-              paramsNotifier.setHighNoiseModel(null);
-              paramsNotifier.setLowNoiseModel(null);
-            }
-          },
+        // Main Video model dropdown with refresh button
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: _ParameterDropdown(
+                label: 'Video Model',
+                value: params.videoModel ?? (mainVideoModels.isNotEmpty ? mainVideoModels.first.name : 'None'),
+                items: mainVideoModels.isEmpty ? ['None'] : mainVideoModels.map((m) => m.name).toList(),
+                onChanged: (v) {
+                  paramsNotifier.setVideoModel(v);
+                  // Apply model-specific defaults (CFG, resolution, etc.)
+                  paramsNotifier.applyModelDefaults(v);
+                  // Auto-set high/low noise for Wan
+                  if (v.toLowerCase().contains('wan') && v.contains('high_noise')) {
+                    paramsNotifier.setHighNoiseModel(v);
+                    paramsNotifier.setLowNoiseModel(v.replaceAll('high_noise', 'low_noise'));
+                  } else {
+                    paramsNotifier.setHighNoiseModel(null);
+                    paramsNotifier.setLowNoiseModel(null);
+                  }
+                },
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              icon: modelsState.isLoading
+                  ? SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary),
+                    )
+                  : Icon(Icons.refresh, size: 18, color: colorScheme.primary),
+              onPressed: modelsState.isLoading
+                  ? null
+                  : () => ref.read(modelsProvider.notifier).refresh(),
+              tooltip: 'Refresh models',
+              padding: const EdgeInsets.all(4),
+              constraints: const BoxConstraints(),
+            ),
+          ],
         ),
         // Wan dual-model selectors (only show for Wan)
         if (isWanModel) ...[
@@ -1260,6 +1376,55 @@ class _ImageToVideoContent extends ConsumerWidget {
           onChanged: (v) => paramsNotifier.setFps(v.round()),
         ),
         const SizedBox(height: 8),
+        // LTX I2V specific options (show when LTX model with init image)
+        if (isLTXI2V) ...[
+          Container(
+            padding: const EdgeInsets.all(8),
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.purple.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.purple.withOpacity(0.3)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.movie_filter, size: 14, color: Colors.purple),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Image-to-Video Settings',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.purple,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _ParameterSlider(
+                  label: 'Augment',
+                  value: params.videoAugmentationLevel,
+                  min: 0,
+                  max: 1,
+                  divisions: 20,
+                  decimals: 2,
+                  onChanged: (v) => paramsNotifier.setVideoAugmentationLevel(v),
+                ),
+                Text(
+                  'Higher values add more motion/variation from init image',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: colorScheme.onSurfaceVariant,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         // Format dropdown
         _ParameterDropdown(
           label: 'Format',
@@ -1355,6 +1520,8 @@ class _VideoExtendContent extends ConsumerWidget {
 class _AdvancedModelAddonsContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
     final modelsState = ref.watch(modelsProvider);
     final vaes = modelsState.vaes;
     final textEncoders = modelsState.textEncoders;
@@ -1365,27 +1532,27 @@ class _AdvancedModelAddonsContent extends ConsumerWidget {
         // VAE dropdown
         _ParameterDropdown(
           label: 'VAE',
-          value: 'Automatic',
+          value: params.vae ?? 'Automatic',
           items: ['Automatic', 'None', ...vaes.map((m) => m.displayName)],
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setVae(v == 'Automatic' ? null : v),
         ),
         const SizedBox(height: 8),
         // Text Encoder dropdown (CLIP/T5)
         if (textEncoders.isNotEmpty) ...[
           _ParameterDropdown(
             label: 'Text Encoder',
-            value: 'Default',
+            value: params.textEncoder ?? 'Default',
             items: ['Default', ...textEncoders.map((m) => m.displayName)],
-            onChanged: (v) {},
+            onChanged: (v) => paramsNotifier.setTextEncoder(v == 'Default' ? null : v),
           ),
           const SizedBox(height: 8),
         ],
         // Precision dropdown
         _ParameterDropdown(
           label: 'Precision',
-          value: 'Automatic',
+          value: params.precision ?? 'Automatic',
           items: ['Automatic', 'fp32', 'fp16', 'bf16', 'fp8'],
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setPrecision(v == 'Automatic' ? null : v),
         ),
       ],
     );
