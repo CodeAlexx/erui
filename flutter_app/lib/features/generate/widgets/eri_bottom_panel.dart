@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,9 @@ import '../../../providers/models_provider.dart';
 import '../../../providers/gallery_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../widgets/image_viewer_dialog.dart';
+import '../../../widgets/image_preview.dart' show isVideoUrl;
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 /// Bottom tab selection
 enum BottomTab { history, presets, models, loras, vaes, embeddings, controlnets, wildcards, tools }
@@ -257,9 +261,10 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
 
     // Create unified list with current batch first
     final allEntries = <_HistoryEntry>[
-      ...currentImages.map((url) => _HistoryEntry(url: url, isCurrentSession: true)),
+      ...currentImages.map((url) => _HistoryEntry(url: url, thumbnailUrl: null, isCurrentSession: true)),
       ...historyImages.map((img) => _HistoryEntry(
         url: '${apiService.baseUrl}${img.url}',
+        thumbnailUrl: img.thumbnailUrl != null ? '${apiService.baseUrl}${img.thumbnailUrl}' : null,
         image: img,
         isCurrentSession: false,
       )),
@@ -318,30 +323,59 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
             itemCount: allEntries.length,
             itemBuilder: (context, index) {
               final entry = allEntries[index];
+              final isVideo = isVideoUrl(entry.url);
+              // Use thumbnail for videos, or the image URL itself for images
+              final displayUrl = isVideo && entry.thumbnailUrl != null ? entry.thumbnailUrl! : entry.url;
+
               return MouseRegion(
                 cursor: SystemMouseCursors.click,
                 child: GestureDetector(
-                  onTap: () => ImageViewerDialog.show(
-                    context,
-                    imageUrl: entry.url,
-                    allImages: allUrls,
-                    initialIndex: index,
-                  ),
+                  onTap: () {
+                    if (isVideo) {
+                      _showVideoDialog(context, entry.url);
+                    } else {
+                      ImageViewerDialog.show(
+                        context,
+                        imageUrl: entry.url,
+                        allImages: allUrls.where((u) => !isVideoUrl(u)).toList(),
+                        initialIndex: allUrls.where((u) => !isVideoUrl(u)).toList().indexOf(entry.url),
+                      );
+                    }
+                  },
+                  onSecondaryTapUp: (details) {
+                    _showContextMenu(context, ref, entry, details.globalPosition);
+                  },
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: CachedNetworkImage(
-                          imageUrl: entry.url,
+                          imageUrl: displayUrl,
                           fit: BoxFit.cover,
                           placeholder: (context, url) => Container(color: colorScheme.surfaceContainerHighest),
                           errorWidget: (context, url, error) => Container(
                             color: colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.broken_image, color: colorScheme.error, size: 20),
+                            child: isVideo
+                                ? Icon(Icons.play_circle_filled, color: colorScheme.primary, size: 32)
+                                : Icon(Icons.broken_image, color: colorScheme.error, size: 20),
                           ),
                         ),
                       ),
+                      // Video indicator overlay
+                      if (isVideo)
+                        Positioned(
+                          bottom: 4,
+                          right: 4,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.black54,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Icon(Icons.play_arrow, color: Colors.white, size: 14),
+                          ),
+                        ),
                       // Current session indicator
                       if (entry.isCurrentSession)
                         Positioned(
@@ -368,12 +402,191 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
   }
 }
 
+/// Show context menu for history item
+void _showContextMenu(BuildContext context, WidgetRef ref, _HistoryEntry entry, Offset position) {
+  final isVideo = isVideoUrl(entry.url);
+  showMenu<String>(
+    context: context,
+    position: RelativeRect.fromLTRB(position.dx, position.dy, position.dx + 1, position.dy + 1),
+    items: [
+      PopupMenuItem<String>(
+        value: 'view',
+        child: Row(
+          children: [
+            Icon(isVideo ? Icons.play_circle : Icons.image, size: 18),
+            const SizedBox(width: 8),
+            Text(isVideo ? 'Play Video' : 'View Image'),
+          ],
+        ),
+      ),
+      PopupMenuItem<String>(
+        value: 'open_folder',
+        child: const Row(
+          children: [
+            Icon(Icons.folder_open, size: 18),
+            SizedBox(width: 8),
+            Text('Open in File Manager'),
+          ],
+        ),
+      ),
+      if (entry.image?.metadata != null)
+        PopupMenuItem<String>(
+          value: 'reuse',
+          child: const Row(
+            children: [
+              Icon(Icons.replay, size: 18),
+              SizedBox(width: 8),
+              Text('Reuse Parameters'),
+            ],
+          ),
+        ),
+      const PopupMenuDivider(),
+      PopupMenuItem<String>(
+        value: 'delete',
+        child: Row(
+          children: [
+            Icon(Icons.delete, size: 18, color: Theme.of(context).colorScheme.error),
+            const SizedBox(width: 8),
+            Text('Delete', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ],
+        ),
+      ),
+    ],
+  ).then((value) async {
+    if (value == null) return;
+    switch (value) {
+      case 'view':
+        if (isVideo) {
+          _showVideoDialog(context, entry.url);
+        } else {
+          ImageViewerDialog.show(context, imageUrl: entry.url);
+        }
+        break;
+      case 'open_folder':
+        // Extract path and open in file manager
+        final uri = Uri.parse(entry.url);
+        final path = uri.queryParameters['path'] ?? '';
+        if (path.isNotEmpty) {
+          Process.run('xdg-open', ['/home/alex/eriui/comfyui/ComfyUI/output/']);
+        }
+        break;
+      case 'reuse':
+        // Apply parameters from image metadata
+        if (entry.image?.metadata != null) {
+          ref.read(generationParamsProvider.notifier).applyFromMetadata(entry.image!.metadata);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Parameters applied'), duration: Duration(seconds: 2)),
+          );
+        }
+        break;
+      case 'delete':
+        // Show confirmation dialog
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Delete?'),
+            content: Text('Delete this ${isVideo ? 'video' : 'image'}?'),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: Text('Delete', style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              ),
+            ],
+          ),
+        );
+        if (confirmed == true && entry.image != null) {
+          ref.read(galleryProvider.notifier).deleteImage(entry.image!.path);
+        }
+        break;
+    }
+  });
+}
+
+/// Show video player in a dialog
+void _showVideoDialog(BuildContext context, String videoUrl) {
+  showDialog(
+    context: context,
+    builder: (context) => _VideoPlayerDialog(videoUrl: videoUrl),
+  );
+}
+
+/// Video player dialog widget
+class _VideoPlayerDialog extends StatefulWidget {
+  final String videoUrl;
+  const _VideoPlayerDialog({required this.videoUrl});
+
+  @override
+  State<_VideoPlayerDialog> createState() => _VideoPlayerDialogState();
+}
+
+class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
+  Player? _player;
+  VideoController? _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    print('Video URL: ${widget.videoUrl}');
+    _player = Player();
+    _controller = VideoController(_player!);
+    _player!.open(Media(widget.videoUrl));
+    _player!.setPlaylistMode(PlaylistMode.loop);
+  }
+
+  @override
+  void dispose() {
+    _player?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    return Dialog(
+      backgroundColor: Colors.black,
+      insetPadding: const EdgeInsets.all(40),
+      child: Container(
+        width: screenSize.width * 0.8,
+        height: screenSize.height * 0.8,
+        color: Colors.black,
+        child: Stack(
+          children: [
+            // Video player
+            Center(
+              child: AspectRatio(
+                aspectRatio: 4 / 3,
+                child: _controller != null
+                    ? Video(
+                        controller: _controller!,
+                        controls: MaterialVideoControls,
+                      )
+                    : const SizedBox(),
+              ),
+            ),
+            // Close button
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryEntry {
   final String url;
+  final String? thumbnailUrl;
   final GalleryImage? image;
   final bool isCurrentSession;
 
-  _HistoryEntry({required this.url, this.image, required this.isCurrentSession});
+  _HistoryEntry({required this.url, this.thumbnailUrl, this.image, required this.isCurrentSession});
 }
 
 /// Models grid tab content like ERI

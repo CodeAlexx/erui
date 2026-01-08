@@ -244,17 +244,16 @@ class GalleryNotifier extends StateNotifier<GalleryState> {
     await loadImages();
   }
 
-  /// Delete image
-  Future<bool> deleteImage(String id) async {
+  /// Delete image by path
+  Future<bool> deleteImage(String path) async {
     try {
       final response = await _apiService.post('/api/DeleteImage', data: {
-        'session_id': _session.sessionId,
-        'image_id': id,
+        'path': path,
       });
 
       if (response.isSuccess) {
         state = state.copyWith(
-          images: state.images.where((img) => img.id != id).toList(),
+          images: state.images.where((img) => img.path != path).toList(),
           totalCount: state.totalCount - 1,
         );
         return true;

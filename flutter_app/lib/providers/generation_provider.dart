@@ -589,6 +589,33 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
     print('DEBUG: New state - videoMode=${state.videoMode}, videoModel=${state.videoModel}, cfgScale=${state.cfgScale}, width=${state.width}');
   }
 
+  /// Apply parameters from image metadata (for reuse functionality)
+  void applyFromMetadata(Map<String, dynamic>? metadata) {
+    if (metadata == null) return;
+
+    // Try SwarmUI format first
+    final suiParams = metadata['sui_image_params'] as Map<String, dynamic>?;
+    final params = suiParams ?? metadata;
+
+    state = state.copyWith(
+      prompt: params['prompt'] as String? ?? state.prompt,
+      negativePrompt: params['negativeprompt'] as String? ?? params['negative_prompt'] as String? ?? state.negativePrompt,
+      model: params['model'] as String? ?? state.model,
+      width: (params['width'] as num?)?.toInt() ?? state.width,
+      height: (params['height'] as num?)?.toInt() ?? state.height,
+      steps: (params['steps'] as num?)?.toInt() ?? state.steps,
+      cfgScale: (params['cfgscale'] as num?)?.toDouble() ?? (params['cfg_scale'] as num?)?.toDouble() ?? state.cfgScale,
+      seed: (params['seed'] as num?)?.toInt() ?? state.seed,
+      sampler: params['sampler'] as String? ?? state.sampler,
+      scheduler: params['scheduler'] as String? ?? state.scheduler,
+      batchSize: (params['images'] as num?)?.toInt() ?? (params['batch_size'] as num?)?.toInt() ?? state.batchSize,
+      // Video params
+      videoMode: params['video_mode'] as bool? ?? state.videoMode,
+      frames: (params['frames'] as num?)?.toInt() ?? state.frames,
+      fps: (params['fps'] as num?)?.toInt() ?? state.fps,
+    );
+  }
+
   void reset() {
     state = const GenerationParams();
   }

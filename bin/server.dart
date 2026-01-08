@@ -16,8 +16,8 @@ void main(List<String> args) async {
   final port = int.parse(_getArg(args, 'port', '7802'));
   final comfyUrl = _getArg(args, 'comfy-url', 'http://localhost:8199');
   final trainerUrl = _getArg(args, 'trainer-url', 'http://localhost:8000');
-  // EriUI output directory - fully standalone from SwarmUI
-  final outputDir = _getArg(args, 'output-dir', '/home/alex/eriui/output');
+  // Output directory - points to ComfyUI output folder
+  final outputDir = _getArg(args, 'output-dir', '/home/alex/eriui/comfyui/ComfyUI/output');
 
   print('Starting EriUI Server (Standalone Mode)...');
   print('ComfyUI backend: $comfyUrl');
@@ -1097,6 +1097,8 @@ class EriUIApi {
       if (path.contains('ViewSpecial')) return await _proxySwarmPreview(request);
       if (path.endsWith('ListImages') || path.endsWith('ListHistory')) return _json(await _listHistory(body));
       if (path.endsWith('GetHistoryImage')) return await _getHistoryImage(request);
+      if (path.endsWith('GetVideoThumbnail')) return await _getVideoThumbnail(request);
+      if (path.endsWith('DeleteImage')) return _json(await _deleteHistoryImage(body));
 
       // ============ TRAINING ENDPOINTS ============
       // Training Control
@@ -1448,19 +1450,23 @@ class EriUIApi {
           folders.add(entityRelPath);
           await _scanOutputFolder(entity, entityRelPath, depth - 1, files, folders, maxFiles);
         } else if (entity is File) {
-          // Only include image files
+          // Include image and video files
           final ext = name.toLowerCase().split('.').last;
-          if (!['png', 'jpg', 'jpeg', 'webp'].contains(ext)) continue;
+          if (!['png', 'jpg', 'jpeg', 'webp', 'mp4', 'webm', 'mov', 'avi', 'mkv', 'gif'].contains(ext)) continue;
           if (name.contains('.swarmpreview.')) continue;
 
           final stat = await entity.stat();
           final metadata = await _extractImageMetadata(entity.path);
 
+          // For videos, provide thumbnail URL
+          final isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv'].contains(ext);
           files.add({
             'src': entityRelPath,
             'name': name,
             'path': entityRelPath,
             'url': '/API/GetHistoryImage?path=${Uri.encodeComponent(entityRelPath)}',
+            'thumbnail_url': isVideo ? '/API/GetVideoThumbnail?path=${Uri.encodeComponent(entityRelPath)}' : null,
+            'is_video': isVideo,
             'date': stat.modified.toIso8601String(),
             'size': stat.size,
             'metadata': metadata,
@@ -1478,6 +1484,26 @@ class EriUIApi {
       final file = File(imagePath);
       if (!await file.exists()) return null;
 
+      final ext = imagePath.split('.').last.toLowerCase();
+
+      // Skip video files - they don't have embedded metadata
+      // For videos, only sidecar JSON files contain metadata
+      if (['mp4', 'webm', 'mov', 'avi', 'mkv'].contains(ext)) {
+        // Only try sidecar file for videos
+        final jsonPath = imagePath.replaceAll(RegExp(r'\.(mp4|webm|mov|avi|mkv)$', caseSensitive: false), '.json');
+        final jsonFile = File(jsonPath);
+        if (await jsonFile.exists()) {
+          try {
+            final jsonContent = await jsonFile.readAsString();
+            final parsed = jsonDecode(jsonContent);
+            if (parsed is Map<String, dynamic>) {
+              return parsed;
+            }
+          } catch (_) {}
+        }
+        return null;
+      }
+
       // First try to read .swarm.json sidecar file
       final jsonPath = imagePath.replaceAll(RegExp(r'\.(png|jpg|jpeg|webp)$', caseSensitive: false), '.swarm.json');
       final jsonFile = File(jsonPath);
@@ -1494,16 +1520,26 @@ class EriUIApi {
       // For PNG files, try to read embedded metadata from PNG text chunk
       if (imagePath.toLowerCase().endsWith('.png')) {
         final bytes = await file.readAsBytes();
+
+        // Try ComfyUI format first (uses 'prompt' chunk)
+        final promptChunk = _extractPngTextChunk(bytes, 'prompt');
+        if (promptChunk != null && promptChunk.isNotEmpty) {
+          try {
+            final workflow = jsonDecode(promptChunk) as Map<String, dynamic>;
+            // Extract useful parameters from ComfyUI workflow
+            return _parseComfyWorkflow(workflow);
+          } catch (_) {}
+        }
+
+        // Fallback to 'parameters' chunk (A1111/SwarmUI format)
         final metadata = _extractPngTextChunk(bytes, 'parameters');
         if (metadata != null && metadata.isNotEmpty) {
           try {
-            // Try parsing as JSON
             final parsed = jsonDecode(metadata);
             if (parsed is Map<String, dynamic>) {
               return parsed;
             }
           } catch (_) {
-            // Return raw metadata string
             return {'raw_parameters': metadata};
           }
         }
@@ -1514,6 +1550,56 @@ class EriUIApi {
       print('Error extracting metadata from $imagePath: $e');
       return null;
     }
+  }
+
+  /// Parse ComfyUI workflow format to extract generation parameters
+  Map<String, dynamic> _parseComfyWorkflow(Map<String, dynamic> workflow) {
+    final result = <String, dynamic>{};
+
+    // Look for KSampler node to get seed, steps, cfg, sampler
+    for (final node in workflow.values) {
+      if (node is! Map<String, dynamic>) continue;
+      final classType = node['class_type'] as String?;
+      final inputs = node['inputs'] as Map<String, dynamic>?;
+      if (inputs == null) continue;
+
+      if (classType == 'KSampler' || classType == 'KSamplerAdvanced') {
+        result['seed'] = inputs['seed'];
+        result['steps'] = inputs['steps'];
+        result['cfgscale'] = inputs['cfg'];
+        result['sampler'] = inputs['sampler_name'];
+        result['scheduler'] = inputs['scheduler'];
+      }
+
+      // Get prompt from CLIPTextEncode
+      if (classType == 'CLIPTextEncode') {
+        final text = inputs['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          // First prompt found is usually positive
+          if (!result.containsKey('prompt')) {
+            result['prompt'] = text;
+          } else if (!result.containsKey('negativeprompt')) {
+            result['negativeprompt'] = text;
+          }
+        }
+      }
+
+      // Get resolution from EmptyLatentImage
+      if (classType == 'EmptyLatentImage') {
+        result['width'] = inputs['width'];
+        result['height'] = inputs['height'];
+      }
+
+      // Get model from CheckpointLoaderSimple
+      if (classType == 'CheckpointLoaderSimple') {
+        result['model'] = inputs['ckpt_name'];
+      }
+    }
+
+    // Store original workflow for reference
+    result['comfy_workflow'] = workflow;
+
+    return result;
   }
 
   /// Extract text chunk from PNG file
@@ -1597,10 +1683,113 @@ class EriUIApi {
       'png' => 'image/png',
       'jpg' || 'jpeg' => 'image/jpeg',
       'webp' => 'image/webp',
+      'gif' => 'image/gif',
+      'mp4' => 'video/mp4',
+      'webm' => 'video/webm',
+      'mov' => 'video/quicktime',
+      'avi' => 'video/x-msvideo',
+      'mkv' => 'video/x-matroska',
       _ => 'application/octet-stream',
     };
 
     return Response.ok(bytes, headers: {'Content-Type': contentType});
+  }
+
+  /// Generate and serve video thumbnail using ffmpeg
+  Future<Response> _getVideoThumbnail(Request request) async {
+    final path = request.url.queryParameters['path'] ?? '';
+    if (path.isEmpty) {
+      return Response.notFound('Missing path parameter');
+    }
+
+    if (path.contains('..')) {
+      return Response.forbidden('Invalid path');
+    }
+
+    final videoPath = '$outputDir/$path';
+    final videoFile = File(videoPath);
+
+    if (!await videoFile.exists()) {
+      return Response.notFound('Video not found');
+    }
+
+    // Thumbnail cache directory
+    final thumbDir = Directory('$outputDir/.thumbnails');
+    if (!await thumbDir.exists()) {
+      await thumbDir.create(recursive: true);
+    }
+
+    // Generate thumbnail filename based on video path
+    final thumbName = path.replaceAll('/', '_').replaceAll(RegExp(r'\.(mp4|webm|mov|avi|mkv)$'), '.jpg');
+    final thumbPath = '${thumbDir.path}/$thumbName';
+    final thumbFile = File(thumbPath);
+
+    // Generate thumbnail if not cached
+    if (!await thumbFile.exists()) {
+      try {
+        final result = await Process.run('ffmpeg', [
+          '-i', videoPath,
+          '-ss', '00:00:00.5',  // 0.5 seconds in
+          '-vframes', '1',
+          '-vf', 'scale=200:-1',  // 200px width, maintain aspect
+          '-y',
+          thumbPath,
+        ]);
+        if (result.exitCode != 0) {
+          print('ffmpeg error: ${result.stderr}');
+          return Response.internalServerError(body: 'Failed to generate thumbnail');
+        }
+      } catch (e) {
+        print('Thumbnail generation error: $e');
+        return Response.internalServerError(body: 'Failed to generate thumbnail: $e');
+      }
+    }
+
+    if (await thumbFile.exists()) {
+      final bytes = await thumbFile.readAsBytes();
+      return Response.ok(bytes, headers: {'Content-Type': 'image/jpeg'});
+    }
+
+    return Response.notFound('Thumbnail not found');
+  }
+
+  /// Delete an image or video from the output directory
+  Future<Map<String, dynamic>> _deleteHistoryImage(Map<String, dynamic> body) async {
+    final path = body['path'] as String? ?? '';
+    if (path.isEmpty) {
+      return {'success': false, 'error': 'Missing path parameter'};
+    }
+
+    // Prevent directory traversal
+    if (path.contains('..')) {
+      return {'success': false, 'error': 'Invalid path'};
+    }
+
+    final filePath = '$outputDir/$path';
+    final file = File(filePath);
+
+    if (!await file.exists()) {
+      return {'success': false, 'error': 'File not found'};
+    }
+
+    try {
+      await file.delete();
+
+      // Also delete video thumbnail if it exists
+      final ext = path.split('.').last.toLowerCase();
+      if (['mp4', 'webm', 'mov', 'avi', 'mkv'].contains(ext)) {
+        final thumbName = path.replaceAll('/', '_').replaceAll(RegExp(r'\.(mp4|webm|mov|avi|mkv)$'), '.jpg');
+        final thumbPath = '$outputDir/.thumbnails/$thumbName';
+        final thumbFile = File(thumbPath);
+        if (await thumbFile.exists()) {
+          await thumbFile.delete();
+        }
+      }
+
+      return {'success': true};
+    } catch (e) {
+      return {'success': false, 'error': 'Failed to delete: $e'};
+    }
   }
 
   Map<String, dynamic> _getProgress(Map<String, dynamic> body) {
