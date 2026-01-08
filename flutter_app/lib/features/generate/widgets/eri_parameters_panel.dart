@@ -1189,6 +1189,8 @@ class _ImageToVideoContent extends ConsumerWidget {
           items: mainVideoModels.isEmpty ? ['None'] : mainVideoModels.map((m) => m.name).toList(),
           onChanged: (v) {
             paramsNotifier.setVideoModel(v);
+            // Apply model-specific defaults (CFG, resolution, etc.)
+            paramsNotifier.applyModelDefaults(v);
             // Auto-set high/low noise for Wan
             if (v.toLowerCase().contains('wan') && v.contains('high_noise')) {
               paramsNotifier.setHighNoiseModel(v);

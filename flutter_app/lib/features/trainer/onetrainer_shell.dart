@@ -133,9 +133,9 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
     if (!connected) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to connect to OneTrainer backend. Make sure it\'s running on port 8100.'),
-            backgroundColor: Colors.red,
+          SnackBar(
+            content: const Text('Failed to connect to OneTrainer backend. Make sure it\'s running on port 8100.'),
+            backgroundColor: Theme.of(context).colorScheme.error,
           ),
         );
       }
@@ -185,7 +185,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Loaded preset: $_currentPreset'),
-          backgroundColor: Colors.green,
+          backgroundColor: Theme.of(context).colorScheme.primary,
         ),
       );
       // TODO: Populate configuration fields with loaded config
@@ -193,7 +193,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to load preset: $_currentPreset'),
-          backgroundColor: Colors.red,
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -214,14 +214,14 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Exported config to: $path'),
-          backgroundColor: Colors.green,
+          backgroundColor: Theme.of(context).colorScheme.primary,
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Export failed'),
-          backgroundColor: Colors.red,
+        SnackBar(
+          content: const Text('Export failed'),
+          backgroundColor: Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -243,7 +243,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
     final config = currentConfig.config;
     if (config == null || config.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No config loaded to save'), backgroundColor: Colors.orange),
+        SnackBar(content: const Text('No config loaded to save'), backgroundColor: Theme.of(context).colorScheme.tertiary),
       );
       return;
     }
@@ -254,7 +254,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.success ? 'Saved preset: $_currentPreset' : 'Save failed: ${result.message}'),
-          backgroundColor: result.success ? Colors.green : Colors.red,
+          backgroundColor: result.success ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -321,8 +321,8 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
                     ),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: const Center(
-                    child: Text('OT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                  child: Center(
+                    child: Text('OT', style: TextStyle(color: colorScheme.onPrimary, fontWeight: FontWeight.bold, fontSize: 11)),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -354,7 +354,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
                       color: isSelected ? colorScheme.primary.withOpacity(0.15) : null,
                       border: Border(
                         left: BorderSide(
-                          color: isSelected ? colorScheme.primary : Colors.transparent,
+                          color: isSelected ? colorScheme.primary : colorScheme.surface,
                           width: 3,
                         ),
                       ),
@@ -403,8 +403,8 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
                               width: 8,
                               height: 8,
                               decoration: BoxDecoration(
-                                color: isConnected ? Colors.green :
-                                       state == ot.OneTrainerConnectionState.connecting ? Colors.orange : Colors.red,
+                                color: isConnected ? colorScheme.primary :
+                                       state == ot.OneTrainerConnectionState.connecting ? colorScheme.tertiary : colorScheme.error,
                                 shape: BoxShape.circle,
                               ),
                             ),
@@ -413,8 +413,8 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
                               isConnected ? 'Connected' :
                               state == ot.OneTrainerConnectionState.connecting ? 'Connecting...' : 'Disconnected',
                               style: TextStyle(
-                                color: isConnected ? Colors.green :
-                                       state == ot.OneTrainerConnectionState.connecting ? Colors.orange : Colors.red,
+                                color: isConnected ? colorScheme.primary :
+                                       state == ot.OneTrainerConnectionState.connecting ? colorScheme.tertiary : colorScheme.error,
                                 fontSize: 12,
                               ),
                             ),
@@ -443,8 +443,8 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
                       );
                     },
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red,
-                      side: const BorderSide(color: Colors.red),
+                      foregroundColor: colorScheme.error,
+                      side: BorderSide(color: colorScheme.error),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                     ),
                     child: const Text('Stop Server', style: TextStyle(fontSize: 12)),
@@ -683,7 +683,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
   Future<void> _startTraining(ot.OneTrainerService service) async {
     if (_currentPreset.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a preset first'), backgroundColor: Colors.orange),
+        SnackBar(content: const Text('Please select a preset first'), backgroundColor: Theme.of(context).colorScheme.tertiary),
       );
       return;
     }
@@ -694,7 +694,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
 
     if (config == null || config.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No config loaded - please load a preset first'), backgroundColor: Colors.red),
+        SnackBar(content: const Text('No config loaded - please load a preset first'), backgroundColor: Theme.of(context).colorScheme.error),
       );
       return;
     }
@@ -705,7 +705,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
     if (tempPath == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save config for training'), backgroundColor: Colors.red),
+          SnackBar(content: const Text('Failed to save config for training'), backgroundColor: Theme.of(context).colorScheme.error),
         );
       }
       return;
@@ -716,7 +716,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),
-          backgroundColor: result.success ? Colors.green : Colors.red,
+          backgroundColor: result.success ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -728,7 +728,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),
-          backgroundColor: result.success ? Colors.green : Colors.red,
+          backgroundColor: result.success ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
         ),
       );
     }
@@ -740,7 +740,7 @@ class _OneTrainerShellState extends ConsumerState<OneTrainerShell> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result.message),
-          backgroundColor: result.success ? Colors.green : Colors.red,
+          backgroundColor: result.success ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
         ),
       );
     }

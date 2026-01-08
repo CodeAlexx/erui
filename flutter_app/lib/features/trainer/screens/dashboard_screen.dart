@@ -137,7 +137,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
                 // Training Method badge
                 if (presetState.trainingMethod.isNotEmpty)
-                  _buildBadge(presetState.trainingMethod, Colors.blue.shade600),
+                  _buildBadge(presetState.trainingMethod, colorScheme.primary),
 
                 const SizedBox(width: 16),
 
@@ -148,9 +148,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     icon: const Icon(Icons.play_arrow, size: 16),
                     label: const Text('Start Training'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.green.withOpacity(0.3),
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
+                      disabledBackgroundColor: colorScheme.primary.withOpacity(0.3),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
                   )
@@ -160,8 +160,8 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     icon: const Icon(Icons.stop, size: 16),
                     label: const Text('Stop Training'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red,
-                      foregroundColor: Colors.white,
+                      backgroundColor: colorScheme.error,
+                      foregroundColor: colorScheme.onError,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     ),
                   ),
@@ -181,7 +181,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.3)),
               ),
@@ -195,11 +195,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       const SizedBox(width: 8),
                       Text(_gpuName, style: TextStyle(color: colorScheme.onSurface, fontSize: 14, fontWeight: FontWeight.w500)),
                       const Spacer(),
-                      _buildGpuStat(Icons.thermostat, '$_gpuTemp°C', _gpuTemp > 80 ? Colors.red : _gpuTemp > 65 ? Colors.orange : Colors.green),
+                      _buildGpuStat(Icons.thermostat, '$_gpuTemp°C', _gpuTemp > 80 ? colorScheme.error : _gpuTemp > 65 ? colorScheme.tertiary : colorScheme.primary),
                       const SizedBox(width: 16),
-                      _buildGpuStat(Icons.air, '$_gpuFan%', Colors.green),
+                      _buildGpuStat(Icons.air, '$_gpuFan%', colorScheme.primary),
                       const SizedBox(width: 16),
-                      _buildGpuStat(Icons.bolt, '${_gpuPower.toInt()}/${_gpuPowerLimit.toInt()}W', Colors.orange),
+                      _buildGpuStat(Icons.bolt, '${_gpuPower.toInt()}/${_gpuPowerLimit.toInt()}W', colorScheme.tertiary),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -209,9 +209,9 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     children: [
                       Expanded(child: _buildProgressBar('GPU', _gpuUtil.toDouble(), 100, colorScheme.primary, colorScheme)),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildProgressBar('VRAM', _vramUsed, _vramTotal, Colors.cyan, colorScheme, suffix: 'GB')),
+                      Expanded(child: _buildProgressBar('VRAM', _vramUsed, _vramTotal, colorScheme.secondary, colorScheme, suffix: 'GB')),
                       const SizedBox(width: 16),
-                      Expanded(child: _buildProgressBar('Power', _gpuPower, _gpuPowerLimit, Colors.orange, colorScheme, suffix: '%')),
+                      Expanded(child: _buildProgressBar('Power', _gpuPower, _gpuPowerLimit, colorScheme.tertiary, colorScheme, suffix: '%')),
                     ],
                   ),
                 ],
@@ -230,7 +230,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             // Training Console
             Container(
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.3)),
               ),
@@ -273,11 +273,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                             children: [
                               _buildStatChip('Epoch', '${progress.currentEpoch}/${progress.totalEpochs}', colorScheme),
                               _buildStatChip('Step', '${progress.currentStep}/${progress.totalSteps}', colorScheme),
-                              _buildStatChip('Loss', progress.loss?.toStringAsFixed(4) ?? '--', colorScheme, color: Colors.yellow),
-                              _buildStatChip('Smooth Loss', progress.smoothLoss?.toStringAsFixed(4) ?? '--', colorScheme, color: Colors.green),
-                              _buildStatChip('Speed', progress.samplesPerSecond != null ? '${progress.samplesPerSecond!.toStringAsFixed(2)} it/s' : '--', colorScheme, color: Colors.cyan),
+                              _buildStatChip('Loss', progress.loss?.toStringAsFixed(4) ?? '--', colorScheme, color: colorScheme.tertiary),
+                              _buildStatChip('Smooth Loss', progress.smoothLoss?.toStringAsFixed(4) ?? '--', colorScheme, color: colorScheme.primary),
+                              _buildStatChip('Speed', progress.samplesPerSecond != null ? '${progress.samplesPerSecond!.toStringAsFixed(2)} it/s' : '--', colorScheme, color: colorScheme.secondary),
                               _buildStatChip('Elapsed', progress.elapsedTime ?? '--', colorScheme),
-                              _buildStatChip('ETA', progress.remainingTime ?? '--', colorScheme, color: Colors.purple),
+                              _buildStatChip('ETA', progress.remainingTime ?? '--', colorScheme, color: colorScheme.tertiary),
                             ],
                           ),
                           const SizedBox(height: 12),
@@ -311,7 +311,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.black,
+                color: colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.3)),
               ),
@@ -327,10 +327,10 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         Container(
                           width: 8,
                           height: 8,
-                          decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                          decoration: BoxDecoration(color: colorScheme.primary, shape: BoxShape.circle),
                         ),
                         const SizedBox(width: 8),
-                        Text('Training ...', style: TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.w500)),
+                        Text('Training ...', style: TextStyle(color: colorScheme.primary, fontSize: 14, fontWeight: FontWeight.w500)),
                         const SizedBox(width: 12),
                         Text('(${presetState.presetName})', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 13)),
                       ],
@@ -351,7 +351,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                     Row(
                       children: [
                         Text('ETA: ', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 12)),
-                        Text(progress.remainingTime ?? '--', style: const TextStyle(color: Colors.purple, fontSize: 13, fontWeight: FontWeight.w500)),
+                        Text(progress.remainingTime ?? '--', style: TextStyle(color: colorScheme.tertiary, fontSize: 13, fontWeight: FontWeight.w500)),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -361,7 +361,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                       child: LinearProgressIndicator(
                         value: progress.totalSteps > 0 ? progress.currentStep / progress.totalSteps : 0,
                         backgroundColor: colorScheme.surfaceContainerHighest.withOpacity(0.3),
-                        valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                        valueColor: AlwaysStoppedAnimation<Color>(colorScheme.primary),
                         minHeight: 8,
                       ),
                     ),
@@ -408,11 +408,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
       itemCount: allLogs.length,
       itemBuilder: (context, index) {
         final log = allLogs[index];
-        Color textColor = colorScheme.onSurface.withOpacity(0.7);
-        if (log.contains('step:')) textColor = Colors.cyan;
-        else if (log.contains('epoch')) textColor = Colors.purple;
-        else if (log.contains('sampling')) textColor = Colors.green;
-        else if (log.contains('error') || log.contains('Error')) textColor = Colors.red;
+        final cs = Theme.of(context).colorScheme;
+        Color textColor = cs.onSurface.withOpacity(0.7);
+        if (log.contains('step:')) textColor = cs.secondary;
+        else if (log.contains('epoch')) textColor = cs.tertiary;
+        else if (log.contains('sampling')) textColor = cs.primary;
+        else if (log.contains('error') || log.contains('Error')) textColor = cs.error;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 4),
@@ -456,13 +457,16 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
   }
 
   Widget _buildGpuStat(IconData icon, String value, Color color) {
-    return Row(
-      children: [
-        Icon(icon, size: 14, color: color),
-        const SizedBox(width: 4),
-        Text(value, style: TextStyle(color: Colors.white, fontSize: 12)),
-      ],
-    );
+    return Builder(builder: (context) {
+      final cs = Theme.of(context).colorScheme;
+      return Row(
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(value, style: TextStyle(color: cs.onSurface, fontSize: 12)),
+        ],
+      );
+    });
   }
 
   Widget _buildProgressBar(String label, double value, double max, Color color, ColorScheme colorScheme, {String? suffix}) {
@@ -476,7 +480,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
             Text(label, style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 11)),
             Text(
               suffix == 'GB' ? '${value.toStringAsFixed(1)}/${max.toStringAsFixed(0)}GB' : '${percentage.toInt()}%',
-              style: TextStyle(color: Colors.white, fontSize: 11),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 11),
             ),
           ],
         ),
@@ -500,7 +504,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
         children: [
           Text(label, style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 10)),
           const SizedBox(height: 2),
-          Text(value, style: TextStyle(color: color ?? Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+          Text(value, style: TextStyle(color: color ?? colorScheme.onSurface, fontSize: 13, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -533,7 +537,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.black,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.3)),
       ),
@@ -562,12 +566,12 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: trainingState.isTraining ? Colors.green.withOpacity(0.2) : colorScheme.surfaceContainerHighest.withOpacity(0.3),
+                    color: trainingState.isTraining ? colorScheme.primary.withOpacity(0.2) : colorScheme.surfaceContainerHighest.withOpacity(0.3),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     trainingState.status.isNotEmpty ? trainingState.status : (trainingState.isTraining ? 'Training...' : 'Idle'),
-                    style: TextStyle(color: trainingState.isTraining ? Colors.green : colorScheme.onSurface.withOpacity(0.7), fontSize: 12),
+                    style: TextStyle(color: trainingState.isTraining ? colorScheme.primary : colorScheme.onSurface.withOpacity(0.7), fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -675,7 +679,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.black,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colorScheme.outlineVariant.withOpacity(0.3)),
       ),
@@ -689,11 +693,11 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
               Text('LOSS CHART', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.5), fontSize: 11, fontWeight: FontWeight.w600, letterSpacing: 1)),
               const Spacer(),
               // Legend
-              Container(width: 12, height: 3, color: Colors.yellow),
+              Container(width: 12, height: 3, color: colorScheme.tertiary),
               const SizedBox(width: 4),
               Text('Loss', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.6), fontSize: 10)),
               const SizedBox(width: 12),
-              Container(width: 12, height: 3, color: Colors.green),
+              Container(width: 12, height: 3, color: colorScheme.primary),
               const SizedBox(width: 4),
               Text('Smooth Loss', style: TextStyle(color: colorScheme.onSurface.withOpacity(0.6), fontSize: 10)),
             ],
@@ -739,7 +743,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         LineChartBarData(
                           spots: _lossHistory,
                           isCurved: true,
-                          color: Colors.yellow,
+                          color: colorScheme.tertiary,
                           barWidth: 2,
                           dotData: FlDotData(show: false),
                         ),
@@ -747,7 +751,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
                         LineChartBarData(
                           spots: _smoothLossHistory,
                           isCurved: true,
-                          color: Colors.green,
+                          color: colorScheme.primary,
                           barWidth: 2,
                           dotData: FlDotData(show: false),
                         ),
@@ -771,7 +775,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
 
     if (config == null || config.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No config loaded - please select a preset first'), backgroundColor: Colors.red),
+        SnackBar(content: const Text('No config loaded - please select a preset first'), backgroundColor: Theme.of(context).colorScheme.error),
       );
       return;
     }
@@ -789,7 +793,7 @@ class _DashboardScreenState extends ConsumerState<DashboardScreen> {
           _logs.add(_LogEntry('error', 'Failed to save config for training'));
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to save config for training'), backgroundColor: Colors.red),
+          SnackBar(content: const Text('Failed to save config for training'), backgroundColor: Theme.of(context).colorScheme.error),
         );
       }
       return;

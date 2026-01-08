@@ -21,12 +21,18 @@ class EriUIApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final colorScheme = ref.watch(colorSchemeProvider);
+    final uiDensity = ref.watch(uiDensityProvider);
+    final densityNotifier = ref.read(uiDensityProvider.notifier);
 
     return MaterialApp.router(
       title: 'ERI',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.light(colorScheme),
-      darkTheme: AppTheme.dark(colorScheme),
+      theme: AppTheme.light(colorScheme).copyWith(
+        visualDensity: densityNotifier.visualDensity,
+      ),
+      darkTheme: AppTheme.dark(colorScheme).copyWith(
+        visualDensity: densityNotifier.visualDensity,
+      ),
       themeMode: themeMode,
       routerConfig: _router,
     );

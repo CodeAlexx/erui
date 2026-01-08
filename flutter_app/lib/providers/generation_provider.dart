@@ -475,6 +475,120 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
     state = state.copyWith(videoFormat: value);
   }
 
+  /// Apply LTX-2 optimized defaults
+  void applyLTX2Defaults() {
+    state = state.copyWith(
+      width: 768,
+      height: 512,
+      cfgScale: 3.0,
+      steps: 20,
+      frames: 121,
+      fps: 24,
+      videoMode: true,
+      videoFormat: 'mp4',
+      sampler: 'euler_ancestral',
+    );
+  }
+
+  /// Apply defaults based on selected model
+  void applyModelDefaults(String? modelName) {
+    if (modelName == null) return;
+    print('DEBUG applyModelDefaults: modelName=$modelName');
+
+    final name = modelName.toLowerCase();
+    if (name.contains('ltx')) {
+      print('DEBUG: Applying LTX-2 defaults');
+      state = state.copyWith(
+        width: 768,
+        height: 512,
+        cfgScale: 3.0,
+        steps: 20,
+        frames: 121,
+        fps: 24,
+        videoMode: true,
+        videoModel: modelName,  // Set videoModel to the selected model
+        videoFormat: 'mp4',
+        sampler: 'euler_ancestral',
+      );
+    } else if (name.contains('wan')) {
+      print('DEBUG: Applying Wan defaults');
+      state = state.copyWith(
+        width: 832,
+        height: 480,
+        cfgScale: 5.0,
+        steps: 20,
+        frames: 81,
+        fps: 16,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'webp',
+      );
+    } else if (name.contains('hunyuan') && name.contains('video')) {
+      print('DEBUG: Applying Hunyuan Video defaults');
+      state = state.copyWith(
+        width: 848,
+        height: 480,
+        cfgScale: 6.0,
+        steps: 30,
+        frames: 45,
+        fps: 24,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'mp4',
+      );
+    } else if (name.contains('mochi')) {
+      print('DEBUG: Applying Mochi defaults');
+      state = state.copyWith(
+        width: 848,
+        height: 480,
+        cfgScale: 4.5,
+        steps: 50,
+        frames: 37,
+        fps: 24,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'mp4',
+        sampler: 'euler',
+      );
+    } else if (name.contains('cogvideo')) {
+      print('DEBUG: Applying CogVideoX defaults');
+      state = state.copyWith(
+        width: 720,
+        height: 480,
+        cfgScale: 6.0,
+        steps: 50,
+        frames: 49,
+        fps: 8,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'mp4',
+      );
+    } else if (name.contains('svd') || name.contains('stable-video')) {
+      print('DEBUG: Applying SVD defaults');
+      state = state.copyWith(
+        width: 1024,
+        height: 576,
+        cfgScale: 2.5,
+        steps: 25,
+        frames: 25,
+        fps: 6,
+        videoMode: true,
+        videoModel: modelName,
+        videoFormat: 'webp',
+      );
+    } else {
+      print('DEBUG: Applying image model defaults');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: 7.0,
+      );
+    }
+    print('DEBUG: New state - videoMode=${state.videoMode}, videoModel=${state.videoModel}, cfgScale=${state.cfgScale}, width=${state.width}');
+  }
+
   void reset() {
     state = const GenerationParams();
   }

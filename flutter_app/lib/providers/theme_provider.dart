@@ -43,6 +43,48 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
   }
 }
 
+/// UI Density enum
+enum UiDensity { compact, comfortable, spacious }
+
+/// UI Density provider
+final uiDensityProvider = StateNotifierProvider<UiDensityNotifier, UiDensity>((ref) {
+  return UiDensityNotifier();
+});
+
+/// UI Density state notifier
+class UiDensityNotifier extends StateNotifier<UiDensity> {
+  UiDensityNotifier() : super(UiDensity.comfortable) {
+    _loadDensity();
+  }
+
+  Future<void> _loadDensity() async {
+    final saved = StorageService.getStringStatic('ui_density');
+    if (saved != null) {
+      state = UiDensity.values.firstWhere(
+        (d) => d.name == saved,
+        orElse: () => UiDensity.comfortable,
+      );
+    }
+  }
+
+  void setDensity(UiDensity density) {
+    state = density;
+    StorageService.setStringStatic('ui_density', density.name);
+  }
+
+  /// Get VisualDensity for Flutter widgets
+  VisualDensity get visualDensity {
+    switch (state) {
+      case UiDensity.compact:
+        return VisualDensity.compact;
+      case UiDensity.comfortable:
+        return VisualDensity.comfortable;
+      case UiDensity.spacious:
+        return const VisualDensity(horizontal: 2.0, vertical: 2.0);
+    }
+  }
+}
+
 /// Color scheme state notifier
 class ColorSchemeNotifier extends StateNotifier<FlexScheme> {
   ColorSchemeNotifier() : super(FlexScheme.gold) {

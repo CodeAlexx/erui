@@ -14,7 +14,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 void main(List<String> args) async {
   final host = _getArg(args, 'host', '0.0.0.0');
   final port = int.parse(_getArg(args, 'port', '7802'));
-  final comfyUrl = _getArg(args, 'comfy-url', 'http://localhost:8189');
+  final comfyUrl = _getArg(args, 'comfy-url', 'http://localhost:8199');
   final trainerUrl = _getArg(args, 'trainer-url', 'http://localhost:8000');
   // EriUI output directory - fully standalone from SwarmUI
   final outputDir = _getArg(args, 'output-dir', '/home/alex/eriui/output');
@@ -566,7 +566,8 @@ class ComfyUIProxy {
     return workflow;
   }
 
-  /// Build LTX-2 video workflow from template
+  /// Build LTX-2 video workflow from exported API workflow JSON
+  /// Uses the full 2-stage sampling + upscaler workflow from ComfyUI
   Map<String, dynamic> _buildLTX2Workflow({
     required String prompt,
     String negativePrompt = '',
@@ -580,96 +581,88 @@ class ComfyUIProxy {
     String? loraModel,
     double loraStrength = 1.0,
   }) {
-    // LTX-2 API workflow - simplified direct node construction
-    final workflow = <String, dynamic>{};
-
-    // Node 1: Checkpoint loader
-    workflow["1"] = {
-      "class_type": "CheckpointLoaderSimple",
-      "inputs": {"ckpt_name": model}
-    };
-
-    // Node 2: CLIP loader for Gemma
-    workflow["2"] = {
-      "class_type": "LTXVGemmaCLIPModelLoader",
-      "inputs": {"clip_name": "gemma_3_12B_it.safetensors"}
-    };
-
-    // Node 3: Positive prompt
-    workflow["3"] = {
-      "class_type": "CLIPTextEncode",
-      "inputs": {"text": prompt, "clip": ["2", 0]}
-    };
-
-    // Node 4: Negative prompt
-    workflow["4"] = {
-      "class_type": "CLIPTextEncode",
-      "inputs": {"text": negativePrompt, "clip": ["2", 0]}
-    };
-
-    // Node 5: Empty latent
-    workflow["5"] = {
-      "class_type": "EmptyLTXVLatentVideo",
-      "inputs": {"width": width, "height": height, "length": frames, "batch_size": 1}
-    };
-
-    // Node 6: Scheduler
-    workflow["6"] = {
-      "class_type": "LTXVScheduler",
-      "inputs": {"steps": steps, "max_shift": 2.05, "base_shift": 0.95, "stretch": true, "terminal": 0.1}
-    };
-
-    // Node 7: Sampler select
-    workflow["7"] = {
-      "class_type": "KSamplerSelect",
-      "inputs": {"sampler_name": "euler"}
-    };
-
-    // Node 8: Model reference (with optional LoRA)
-    var modelRef = ["1", 0];
-    if (loraModel != null && loraModel.isNotEmpty) {
-      workflow["20"] = {
-        "class_type": "LoraLoaderModelOnly",
-        "inputs": {"model": ["1", 0], "lora_name": loraModel, "strength_model": loraStrength}
-      };
-      modelRef = ["20", 0];
+    // Load the exported API workflow
+    final workflowFile = File('workflows/ltx2_api.json');
+    if (!workflowFile.existsSync()) {
+      throw Exception('LTX-2 workflow file not found: workflows/ltx2_api.json');
     }
 
-    // Node 9: Sampler
-    workflow["9"] = {
-      "class_type": "SamplerCustomAdvanced",
-      "inputs": {
-        "noise": ["10", 0],
-        "guider": ["11", 0],
-        "sampler": ["7", 0],
-        "sigmas": ["6", 0],
-        "latent_image": ["5", 0]
+    final workflowJson = workflowFile.readAsStringSync();
+    final workflow = Map<String, dynamic>.from(jsonDecode(workflowJson) as Map);
+
+    // Update dynamic parameters in the workflow
+    for (final entry in workflow.entries) {
+      final node = entry.value as Map<String, dynamic>;
+      final classType = node['class_type'] as String?;
+      final inputs = node['inputs'] as Map<String, dynamic>?;
+      if (inputs == null) continue;
+
+      switch (classType) {
+        // Update model references
+        case 'CheckpointLoaderSimple':
+        case 'LTXVAudioVAELoader':
+        case 'LTXAVTextEncoderLoader':
+          if (inputs.containsKey('ckpt_name') && inputs['ckpt_name'] is String) {
+            inputs['ckpt_name'] = model;
+          }
+          break;
+
+        // Update prompt - node 3 is positive prompt
+        case 'CLIPTextEncode':
+          if (inputs.containsKey('text')) {
+            final text = inputs['text'] as String? ?? '';
+            // Node 3 is positive, node 4 is negative (check by content)
+            if (text == 'PROMPT_PLACEHOLDER' || text.contains('cheerful girl puppet')) {
+              inputs['text'] = prompt;
+            }
+            // Keep negative prompt as-is from workflow (it's comprehensive)
+          }
+          break;
+
+        // Update video dimensions
+        case 'EmptyLTXVLatentVideo':
+          inputs['width'] = width;
+          inputs['height'] = height;
+          inputs['length'] = frames;
+          break;
+
+        // Update EmptyImage for upscaler reference
+        case 'EmptyImage':
+          inputs['width'] = width;
+          inputs['height'] = height;
+          break;
+
+        // Update seed
+        case 'RandomNoise':
+          inputs['noise_seed'] = seed;
+          break;
+
+        // Update steps in scheduler
+        case 'LTXVScheduler':
+          inputs['steps'] = steps;
+          break;
+
+        // Update CFG (first CFGGuider is stage 1 with higher CFG)
+        case 'CFGGuider':
+          // Keep stage 2 CFG at 1, only update stage 1 if it has higher value
+          if ((inputs['cfg'] as num?) != null && (inputs['cfg'] as num) > 1) {
+            inputs['cfg'] = cfg;
+          }
+          break;
+
+        // Update LoRA if specified
+        case 'LoraLoaderModelOnly':
+          if (loraModel != null && loraModel.isNotEmpty) {
+            // Only update the distilled LoRA, not camera LoRAs
+            final loraName = inputs['lora_name'] as String? ?? '';
+            if (loraName.contains('distilled')) {
+              inputs['lora_name'] = loraModel;
+              inputs['strength_model'] = loraStrength;
+            }
+          }
+          break;
       }
-    };
-
-    // Node 10: Random noise
-    workflow["10"] = {
-      "class_type": "RandomNoise",
-      "inputs": {"noise_seed": seed}
-    };
-
-    // Node 11: CFG guider
-    workflow["11"] = {
-      "class_type": "CFGGuider",
-      "inputs": {"model": modelRef, "positive": ["3", 0], "negative": ["4", 0], "cfg": cfg}
-    };
-
-    // Node 12: VAE Decode
-    workflow["12"] = {
-      "class_type": "VAEDecode",
-      "inputs": {"samples": ["9", 0], "vae": ["1", 2]}
-    };
-
-    // Node 13: Save video
-    workflow["13"] = {
-      "class_type": "SaveVideo",
-      "inputs": {"video": ["12", 0], "filename_prefix": "EriUI_LTX2", "format": "mp4", "codec": "auto"}
-    };
+    }
 
     return workflow;
   }

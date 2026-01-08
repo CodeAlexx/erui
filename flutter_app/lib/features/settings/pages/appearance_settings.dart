@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 
 import '../../../providers/providers.dart';
+import '../../../providers/theme_provider.dart';
 import '../../../theme/app_theme.dart';
 import '../widgets/settings_section.dart';
 
@@ -176,24 +177,24 @@ class AppearanceSettingsPage extends ConsumerWidget {
                     style: Theme.of(context).textTheme.titleSmall,
                   ),
                   const SizedBox(height: 12),
-                  SegmentedButton<String>(
+                  SegmentedButton<UiDensity>(
                     segments: const [
                       ButtonSegment(
-                        value: 'compact',
+                        value: UiDensity.compact,
                         label: Text('Compact'),
                       ),
                       ButtonSegment(
-                        value: 'comfortable',
+                        value: UiDensity.comfortable,
                         label: Text('Comfortable'),
                       ),
                       ButtonSegment(
-                        value: 'spacious',
+                        value: UiDensity.spacious,
                         label: Text('Spacious'),
                       ),
                     ],
-                    selected: const {'comfortable'},
+                    selected: {ref.watch(uiDensityProvider)},
                     onSelectionChanged: (selection) {
-                      // TODO: Implement
+                      ref.read(uiDensityProvider.notifier).setDensity(selection.first);
                     },
                   ),
                 ],

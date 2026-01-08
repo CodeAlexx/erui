@@ -191,8 +191,8 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         children: [
           // Mode selector tabs
           Container(
-            decoration: const BoxDecoration(
-              border: Border(right: BorderSide(color: Color(0xFF1f2937))),
+            decoration: BoxDecoration(
+              border: Border(right: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
             ),
             child: Row(
               children: [
@@ -216,7 +216,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Text(
               'OneTrainer Inference',
-              style: TextStyle(color: Colors.grey[600], fontSize: 12),
+              style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
             ),
           ),
         ],
@@ -245,12 +245,12 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: isSelected ? colorScheme.primary : Colors.grey),
+            Icon(icon, size: 16, color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? colorScheme.primary : Colors.grey,
+                color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 fontSize: 13,
               ),
             ),
@@ -278,12 +278,12 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 16, color: isSelected ? colorScheme.primary : Colors.grey),
+            Icon(icon, size: 16, color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? colorScheme.primary : Colors.grey,
+                color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 fontSize: 13,
               ),
             ),
@@ -294,21 +294,23 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildSimpleTab(String label, VoidCallback onTap) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+        child: Text(label, style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13)),
       ),
     );
   }
 
   Widget _buildLeftSidebar() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       width: 288,
-      decoration: const BoxDecoration(
-        color: Color(0xFF111827),
-        border: Border(right: BorderSide(color: Color(0xFF1f2937))),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(right: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
       ),
       child: ListView(
         children: [
@@ -316,15 +318,15 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
           Padding(
             padding: const EdgeInsets.all(8),
             child: TextField(
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
               decoration: InputDecoration(
                 hintText: 'Filter parameters...',
-                hintStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
+                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                 filled: true,
-                fillColor: const Color(0xFF1f2937),
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               ),
@@ -432,9 +434,9 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                 Checkbox(
                   value: _showAdvanced,
                   onChanged: (v) => setState(() => _showAdvanced = v!),
-                  activeColor: Colors.amber,
+                  activeColor: colorScheme.primary,
                 ),
-                Text('Display Advanced Options', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                Text('Display Advanced Options', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
               ],
             ),
           ),
@@ -445,11 +447,14 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
               title: 'LoRAs',
               children: [
                 ..._loras.asMap().entries.map((e) => _buildLoraRow(e.key)),
-                TextButton.icon(
-                  onPressed: () => setState(() => _loras.add({'path': '', 'weight': 1.0, 'enabled': true})),
-                  icon: const Icon(Icons.add, size: 14, color: Colors.amber),
-                  label: const Text('Add LoRA', style: TextStyle(color: Colors.amber, fontSize: 12)),
-                ),
+                Builder(builder: (context) {
+                  final cs = Theme.of(context).colorScheme;
+                  return TextButton.icon(
+                    onPressed: () => setState(() => _loras.add({'path': '', 'weight': 1.0, 'enabled': true})),
+                    icon: Icon(Icons.add, size: 14, color: cs.primary),
+                    label: Text('Add LoRA', style: TextStyle(color: cs.primary, fontSize: 12)),
+                  );
+                }),
               ],
             ),
         ],
@@ -458,24 +463,25 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildSeedRow() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: [
           SizedBox(
             width: 80,
-            child: Text('Seed', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+            child: Text('Seed', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
           ),
           Expanded(
             child: TextField(
               controller: TextEditingController(text: _seed.toString()),
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF1f2937),
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
               ),
@@ -483,8 +489,8 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
             ),
           ),
           const SizedBox(width: 4),
-          _buildIconButton('🎲', Colors.amber, () => setState(() => _seed = DateTime.now().millisecondsSinceEpoch % 2147483647)),
-          _buildIconButton('♻️', Colors.amber.shade700, () {
+          _buildIconButton('🎲', colorScheme.primary, () => setState(() => _seed = DateTime.now().millisecondsSinceEpoch % 2147483647)),
+          _buildIconButton('♻️', colorScheme.secondary, () {
             if (_selectedImage != null) setState(() => _seed = _selectedImage!['seed'] ?? -1);
           }),
         ],
@@ -507,13 +513,14 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildSlider(String label, double value, double min, double max, Function(double) onChange, {double step = 1}) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: [
           SizedBox(
             width: 80,
-            child: Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+            child: Text(label, style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
           ),
           Expanded(
             child: Slider(
@@ -522,21 +529,21 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
               max: max,
               divisions: ((max - min) / step).round(),
               onChanged: onChange,
-              activeColor: Colors.amber,
+              activeColor: colorScheme.primary,
             ),
           ),
           SizedBox(
             width: 56,
             child: TextField(
               controller: TextEditingController(text: step < 1 ? value.toStringAsFixed(1) : value.toInt().toString()),
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
               textAlign: TextAlign.right,
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF1f2937),
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               ),
@@ -549,28 +556,29 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildDropdown(String label, String value, List<String> options, Function(String) onChange) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Row(
         children: [
           SizedBox(
             width: 80,
-            child: Text(label, style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+            child: Text(label, style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
           ),
           Expanded(
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFF1f2937),
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: const Color(0xFF374151)),
+                border: Border.all(color: colorScheme.outlineVariant),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
                   value: options.contains(value) ? value : options.first,
                   isExpanded: true,
-                  dropdownColor: const Color(0xFF1f2937),
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  dropdownColor: colorScheme.surfaceContainerHighest,
+                  style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
                   items: options.map((o) => DropdownMenuItem(value: o, child: Text(o))).toList(),
                   onChanged: (v) => onChange(v!),
                 ),
@@ -583,6 +591,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildInitImageSection() {
+    final colorScheme = Theme.of(context).colorScheme;
     if (_initImage != null) {
       return Column(
         children: [
@@ -592,7 +601,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                 margin: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF374151)),
+                  border: Border.all(color: colorScheme.outlineVariant),
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -610,10 +619,10 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.red,
+                      color: colorScheme.error,
                       borderRadius: BorderRadius.circular(4),
                     ),
-                    child: const Icon(Icons.close, size: 14, color: Colors.white),
+                    child: Icon(Icons.close, size: 14, color: colorScheme.onError),
                   ),
                 ),
               ),
@@ -625,14 +634,14 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Mask', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                  Text('Mask', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                   ElevatedButton.icon(
                     onPressed: () => setState(() => _showMaskEditor = true),
                     icon: const Icon(Icons.brush, size: 14),
                     label: Text(_maskImage != null ? 'Edit Mask' : 'Create Mask'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.purple,
-                      foregroundColor: Colors.white,
+                      backgroundColor: colorScheme.tertiary,
+                      foregroundColor: colorScheme.onTertiary,
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     ),
                   ),
@@ -651,14 +660,14 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFF374151), style: BorderStyle.solid),
+              border: Border.all(color: colorScheme.outlineVariant, style: BorderStyle.solid),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Column(
               children: [
-                Icon(Icons.cloud_upload, color: Colors.grey[600]),
+                Icon(Icons.cloud_upload, color: colorScheme.onSurfaceVariant),
                 const SizedBox(height: 8),
-                Text('Drop image here or click to upload', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                Text('Drop image here or click to upload', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
               ],
             ),
           ),
@@ -672,8 +681,8 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                 icon: const Icon(Icons.image, size: 14),
                 label: const Text('Use selected image'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF374151),
-                  foregroundColor: Colors.white,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                  foregroundColor: colorScheme.onSurface,
                 ),
               ),
             ),
@@ -683,6 +692,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildLoraRow(int index) {
+    final colorScheme = Theme.of(context).colorScheme;
     final lora = _loras[index];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -691,15 +701,15 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
           Expanded(
             child: TextField(
               controller: TextEditingController(text: lora['path']),
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 11),
               decoration: InputDecoration(
                 hintText: 'LoRA path...',
-                hintStyle: TextStyle(color: Colors.grey[600], fontSize: 11),
+                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11),
                 filled: true,
-                fillColor: const Color(0xFF1f2937),
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               ),
@@ -710,20 +720,20 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
             width: 48,
             child: TextField(
               controller: TextEditingController(text: lora['weight'].toString()),
-              style: const TextStyle(color: Colors.white, fontSize: 11),
+              style: TextStyle(color: colorScheme.onSurface, fontSize: 11),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF1f2937),
+                fillColor: colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(4),
-                  borderSide: const BorderSide(color: Color(0xFF374151)),
+                  borderSide: BorderSide(color: colorScheme.outlineVariant),
                 ),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               ),
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.delete, size: 14, color: Colors.red),
+            icon: Icon(Icons.delete, size: 14, color: colorScheme.error),
             onPressed: () => setState(() => _loras.removeAt(index)),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
@@ -734,12 +744,13 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildPreviewArea() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       children: [
         // Image preview
         Expanded(
           child: Container(
-            color: const Color(0xFF030712),
+            color: colorScheme.surface,
             child: Center(
               child: _selectedImage != null
                   ? Column(
@@ -751,7 +762,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                             child: Image.network(
                               '/api/gallery/${_selectedImage!['id']}',
                               fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.broken_image, size: 64, color: Colors.grey),
+                              errorBuilder: (_, __, ___) => Icon(Icons.broken_image, size: 64, color: colorScheme.onSurfaceVariant),
                             ),
                           ),
                         ),
@@ -760,9 +771,9 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                   : Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text('Welcome to OneTrainer Inference', style: TextStyle(color: Colors.grey[600], fontSize: 18)),
+                        Text('Welcome to OneTrainer Inference', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 18)),
                         const SizedBox(height: 8),
-                        Text('Select a model and generate images', style: TextStyle(color: Colors.grey[700], fontSize: 14)),
+                        Text('Select a model and generate images', style: TextStyle(color: colorScheme.onSurfaceVariant.withOpacity(0.7), fontSize: 14)),
                       ],
                     ),
             ),
@@ -773,13 +784,13 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         if (_isLoadingModel || _isGenerating)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: const Color(0xFF111827).withOpacity(0.8),
+            color: colorScheme.surface.withOpacity(0.9),
             child: Row(
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.amber),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: colorScheme.primary),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -788,7 +799,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                       : _isGenerating && _currentStep > 0
                           ? 'Step $_currentStep/$_totalSteps'
                           : 'Starting generation...',
-                  style: const TextStyle(color: Colors.amber, fontSize: 14),
+                  style: TextStyle(color: colorScheme.primary, fontSize: 14),
                 ),
                 if (_isGenerating && _totalSteps > 0) ...[
                   const SizedBox(width: 16),
@@ -797,14 +808,14 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: _currentStep / _totalSteps,
-                        backgroundColor: const Color(0xFF1f2937),
-                        color: Colors.amber,
+                        backgroundColor: colorScheme.surfaceContainerHighest,
+                        color: colorScheme.primary,
                         minHeight: 8,
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('${((_currentStep / _totalSteps) * 100).round()}%', style: TextStyle(color: Colors.grey[400], fontSize: 12)),
+                  Text('${((_currentStep / _totalSteps) * 100).round()}%', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                 ],
               ],
             ),
@@ -813,9 +824,9 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         // Prompt area
         Container(
           padding: const EdgeInsets.all(12),
-          decoration: const BoxDecoration(
-            color: Color(0xFF111827),
-            border: Border(top: BorderSide(color: Color(0xFF1f2937))),
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            border: Border(top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
           ),
           child: Column(
             children: [
@@ -824,15 +835,15 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.2),
+                    color: colorScheme.error.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: Colors.red.withOpacity(0.5)),
+                    border: Border.all(color: colorScheme.error.withOpacity(0.5)),
                   ),
                   child: Row(
                     children: [
-                      Expanded(child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13))),
+                      Expanded(child: Text(_error!, style: TextStyle(color: colorScheme.error, fontSize: 13))),
                       IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                        icon: Icon(Icons.close, size: 16, color: colorScheme.error),
                         onPressed: () => setState(() => _error = null),
                       ),
                     ],
@@ -847,21 +858,21 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                         // Positive prompt
                         Row(
                           children: [
-                            const Text('+', style: TextStyle(color: Colors.green, fontSize: 16)),
+                            Text('+', style: TextStyle(color: colorScheme.primary, fontSize: 16)),
                             const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 controller: TextEditingController(text: _prompt),
-                                style: const TextStyle(color: Colors.white, fontSize: 13),
+                                style: TextStyle(color: colorScheme.onSurface, fontSize: 13),
                                 maxLines: 1,
                                 decoration: InputDecoration(
                                   hintText: 'Type your prompt here...',
-                                  hintStyle: TextStyle(color: Colors.grey[600], fontSize: 13),
+                                  hintStyle: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13),
                                   filled: true,
-                                  fillColor: const Color(0xFF1f2937),
+                                  fillColor: colorScheme.surfaceContainerHighest,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(4),
-                                    borderSide: const BorderSide(color: Color(0xFF374151)),
+                                    borderSide: BorderSide(color: colorScheme.outlineVariant),
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
                                 ),
@@ -875,20 +886,20 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                         // Negative prompt
                         Row(
                           children: [
-                            Text('Neg:', style: TextStyle(color: Colors.grey[500], fontSize: 11)),
+                            Text('Neg:', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 11)),
                             const SizedBox(width: 8),
                             Expanded(
                               child: TextField(
                                 controller: TextEditingController(text: _negPrompt),
-                                style: const TextStyle(color: Colors.white, fontSize: 12),
+                                style: TextStyle(color: colorScheme.onSurface, fontSize: 12),
                                 decoration: InputDecoration(
                                   hintText: 'Optionally, type a negative prompt here...',
-                                  hintStyle: TextStyle(color: Colors.grey[600], fontSize: 12),
+                                  hintStyle: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12),
                                   filled: true,
-                                  fillColor: const Color(0xFF1f2937),
+                                  fillColor: colorScheme.surfaceContainerHighest,
                                   border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(4),
-                                    borderSide: const BorderSide(color: Color(0xFF374151)),
+                                    borderSide: BorderSide(color: colorScheme.outlineVariant),
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                 ),
@@ -906,8 +917,8 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                       ElevatedButton(
                         onPressed: _isGenerating ? _cancel : _generate,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: _isGenerating ? Colors.red : Colors.amber,
-                          foregroundColor: Colors.black,
+                          backgroundColor: _isGenerating ? colorScheme.error : colorScheme.primary,
+                          foregroundColor: _isGenerating ? colorScheme.onError : colorScheme.onPrimary,
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         ),
                         child: Row(
@@ -921,7 +932,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                       const SizedBox(height: 4),
                       IconButton(
                         icon: const Icon(Icons.settings, size: 16),
-                        color: Colors.grey,
+                        color: colorScheme.onSurfaceVariant,
                         onPressed: () {},
                       ),
                     ],
@@ -936,10 +947,11 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildBottomBar() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF111827),
-        border: Border(top: BorderSide(color: Color(0xFF1f2937))),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
       ),
       child: Column(
         children: [
@@ -947,7 +959,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
           SizedBox(
             height: 80,
             child: _gallery.isEmpty
-                ? Center(child: Text('No images yet', style: TextStyle(color: Colors.grey[600], fontSize: 13)))
+                ? Center(child: Text('No images yet', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 13)))
                 : ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.all(4),
@@ -961,7 +973,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                           margin: const EdgeInsets.symmetric(horizontal: 2),
                           decoration: BoxDecoration(
                             border: Border.all(
-                              color: isSelected ? Colors.amber : Colors.transparent,
+                              color: isSelected ? colorScheme.primary : Colors.transparent,
                               width: 2,
                             ),
                             borderRadius: BorderRadius.circular(4),
@@ -979,27 +991,27 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
           // Bottom tabs & model selector
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: const BoxDecoration(
-              color: Color(0xFF030712),
-              border: Border(top: BorderSide(color: Color(0xFF1f2937))),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              border: Border(top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
             ),
             child: Row(
               children: [
                 // Model selector
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: const BoxDecoration(
-                    border: Border(right: BorderSide(color: Color(0xFF1f2937))),
+                  decoration: BoxDecoration(
+                    border: Border(right: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
                   ),
                   child: Row(
                     children: [
-                      Text('Model:', style: TextStyle(color: Colors.grey[500], fontSize: 12)),
+                      Text('Model:', style: TextStyle(color: colorScheme.onSurfaceVariant, fontSize: 12)),
                       const SizedBox(width: 8),
                       DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           value: _modelType,
-                          dropdownColor: const Color(0xFF1f2937),
-                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          dropdownColor: colorScheme.surfaceContainerHighest,
+                          style: TextStyle(color: colorScheme.onSurface, fontSize: 13),
                           items: modelOptions.map((m) => DropdownMenuItem(value: m.value, child: Text(m.label))).toList(),
                           onChanged: (v) => setState(() => _modelType = v!),
                         ),
@@ -1009,8 +1021,8 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                           margin: const EdgeInsets.only(left: 8),
                           width: 8,
                           height: 8,
-                          decoration: const BoxDecoration(
-                            color: Colors.green,
+                          decoration: BoxDecoration(
+                            color: colorScheme.primary,
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -1026,7 +1038,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
                 _buildBottomTab('ControlNets', false),
 
                 const Spacer(),
-                Text('OneTrainer Inference v1.0', style: TextStyle(color: Colors.grey[700], fontSize: 11)),
+                Text('OneTrainer Inference v1.0', style: TextStyle(color: colorScheme.onSurfaceVariant.withOpacity(0.5), fontSize: 11)),
               ],
             ),
           ),
@@ -1036,6 +1048,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
   }
 
   Widget _buildBottomTab(String label, bool isSelected) {
+    final colorScheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: () {},
       child: Padding(
@@ -1043,7 +1056,7 @@ class _TrainerScreenState extends ConsumerState<TrainerScreen> {
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.amber : Colors.grey[500],
+            color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
             fontSize: 13,
           ),
         ),
@@ -1095,9 +1108,10 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFF374151))),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
       ),
       child: Column(
         children: [
@@ -1110,13 +1124,13 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                   Icon(
                     _isOpen ? Icons.expand_more : Icons.chevron_right,
                     size: 16,
-                    color: Colors.grey[400],
+                    color: colorScheme.onSurfaceVariant,
                   ),
                   const SizedBox(width: 4),
                   Expanded(
                     child: Text(
                       widget.title,
-                      style: TextStyle(color: Colors.grey[300], fontSize: 13),
+                      style: TextStyle(color: colorScheme.onSurface, fontSize: 13),
                     ),
                   ),
                   if (widget.toggle)
@@ -1126,7 +1140,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                         width: 32,
                         height: 16,
                         decoration: BoxDecoration(
-                          color: widget.enabled ? Colors.amber : const Color(0xFF374151),
+                          color: widget.enabled ? colorScheme.primary : colorScheme.outlineVariant,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: AnimatedAlign(
@@ -1136,8 +1150,8 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
                             width: 12,
                             height: 12,
                             margin: const EdgeInsets.symmetric(horizontal: 2),
-                            decoration: const BoxDecoration(
-                              color: Colors.white,
+                            decoration: BoxDecoration(
+                              color: colorScheme.onPrimary,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -1150,7 +1164,7 @@ class _CollapsibleSectionState extends State<_CollapsibleSection> {
           ),
           if (_isOpen)
             Container(
-              color: const Color(0xFF111827).withOpacity(0.5),
+              color: colorScheme.surface.withOpacity(0.5),
               padding: const EdgeInsets.only(bottom: 8),
               child: Column(children: widget.children),
             ),

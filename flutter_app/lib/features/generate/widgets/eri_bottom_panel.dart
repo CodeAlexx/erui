@@ -438,6 +438,7 @@ class _ModelsGridTab extends ConsumerWidget {
 
               return _ModelCard(model: model, isSelected: isSelected, onTap: () {
                 ref.read(generationParamsProvider.notifier).setModel(model.name);
+                ref.read(generationParamsProvider.notifier).applyModelDefaults(model.name);
               });
             },
           ),

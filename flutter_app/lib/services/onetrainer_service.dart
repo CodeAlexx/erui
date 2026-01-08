@@ -142,8 +142,8 @@ class CurrentConfigNotifier extends StateNotifier<CurrentConfig> {
 class OneTrainerService {
   late Dio _dio;
   WebSocketChannel? _wsChannel;
-  String _baseUrl = 'http://localhost:8000';
-  String _wsUrl = 'ws://localhost:8000/ws';
+  String _baseUrl = 'http://localhost:8100';
+  String _wsUrl = 'ws://localhost:8100/ws';
 
   final _connectionStateController = StreamController<OneTrainerConnectionState>.broadcast();
   Stream<OneTrainerConnectionState> get connectionState => _connectionStateController.stream;

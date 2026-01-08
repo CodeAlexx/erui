@@ -149,11 +149,11 @@ class _PromptBarState extends ConsumerState<PromptBar> {
                       )
                     : FilledButton.icon(
                         onPressed: () {
-                          print('DEBUG: prompt="${params.prompt}", model=${params.model}');
-                          print('DEBUG: promptEmpty=${params.prompt.trim().isEmpty}, modelNull=${params.model == null}');
-                          if (params.prompt.trim().isEmpty || params.model == null) {
+                          final modelToUse = params.videoMode ? params.videoModel : params.model;
+                          print('DEBUG: prompt="${params.prompt}", model=$modelToUse, videoMode=${params.videoMode}');
+                          if (params.prompt.trim().isEmpty || modelToUse == null) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Need prompt: "${params.prompt}", model: ${params.model}')),
+                              SnackBar(content: Text('Need prompt and model (videoMode: ${params.videoMode})')),
                             );
                             return;
                           }
@@ -220,6 +220,7 @@ class _ModelDropdown extends ConsumerWidget {
       }).toList(),
       onSelected: (value) {
         ref.read(generationParamsProvider.notifier).setModel(value);
+        ref.read(generationParamsProvider.notifier).applyModelDefaults(value);
       },
     );
   }

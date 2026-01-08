@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import 'image_viewer_dialog.dart';
+
+/// Check if URL is a video file
+bool isVideoUrl(String? url) {
+  if (url == null) return false;
+  final lower = url.toLowerCase();
+  return lower.contains('.mp4') || lower.contains('.webm') ||
+         lower.contains('.mov') || lower.contains('.avi') ||
+         lower.contains('.mkv');
+}
 
 /// Image preview widget with loading and error states
 class ImagePreview extends StatelessWidget {
@@ -103,8 +114,8 @@ class ImagePreview extends StatelessWidget {
   }
 }
 
-/// Generation preview widget with progress overlay
-class GenerationPreview extends StatelessWidget {
+/// Generation preview widget with progress overlay - supports images and videos
+class GenerationPreview extends StatefulWidget {
   final String? imageUrl;
   final bool isGenerating;
   final double progress;
@@ -122,18 +133,71 @@ class GenerationPreview extends StatelessWidget {
     this.allImages,
   });
 
-  void _openViewer(BuildContext context) {
-    if (imageUrl == null || imageUrl!.isEmpty) return;
+  @override
+  State<GenerationPreview> createState() => _GenerationPreviewState();
+}
+
+class _GenerationPreviewState extends State<GenerationPreview> {
+  Player? _player;
+  VideoController? _videoController;
+  String? _currentVideoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _initVideoIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(GenerationPreview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.imageUrl != widget.imageUrl) {
+      _initVideoIfNeeded();
+    }
+  }
+
+  void _initVideoIfNeeded() {
+    final url = widget.imageUrl;
+    if (url != null && isVideoUrl(url) && url != _currentVideoUrl) {
+      _disposeVideo();
+      _player = Player();
+      _videoController = VideoController(_player!);
+      _currentVideoUrl = url;
+      _player!.open(Media(url));
+      _player!.setPlaylistMode(PlaylistMode.loop);
+      setState(() {});
+    } else if ((url == null || !isVideoUrl(url)) && _player != null) {
+      _disposeVideo();
+      setState(() {});
+    }
+  }
+
+  void _disposeVideo() {
+    _player?.dispose();
+    _player = null;
+    _videoController = null;
+    _currentVideoUrl = null;
+  }
+
+  @override
+  void dispose() {
+    _disposeVideo();
+    super.dispose();
+  }
+
+  void _openImageViewer(BuildContext context) {
+    if (widget.imageUrl == null || widget.imageUrl!.isEmpty) return;
+    if (isVideoUrl(widget.imageUrl)) return;
 
     int index = 0;
-    if (allImages != null && allImages!.contains(imageUrl)) {
-      index = allImages!.indexOf(imageUrl!);
+    if (widget.allImages != null && widget.allImages!.contains(widget.imageUrl)) {
+      index = widget.allImages!.indexOf(widget.imageUrl!);
     }
 
     ImageViewerDialog.show(
       context,
-      imageUrl: imageUrl!,
-      allImages: allImages,
+      imageUrl: widget.imageUrl!,
+      allImages: widget.allImages,
       initialIndex: index,
     );
   }
@@ -141,29 +205,61 @@ class GenerationPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isVideo = isVideoUrl(widget.imageUrl);
 
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Image or placeholder - clickable
-        if (imageUrl != null && imageUrl!.isNotEmpty)
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: () => _openViewer(context),
-              child: CachedNetworkImage(
-                imageUrl: imageUrl!,
-                fit: BoxFit.contain,
-                placeholder: (context, url) => _buildPlaceholder(context),
-                errorWidget: (context, url, error) => _buildPlaceholder(context),
+        // Video, Image or placeholder
+        if (widget.imageUrl != null && widget.imageUrl!.isNotEmpty)
+          if (isVideo && _videoController != null)
+            // Embedded video player
+            Container(
+              color: Colors.black,
+              child: Center(
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Video(
+                    controller: _videoController!,
+                    controls: MaterialVideoControls,
+                  ),
+                ),
               ),
-            ),
-          )
+            )
+          else if (isVideo)
+            // Loading video
+            Container(
+              color: Colors.black,
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: colorScheme.primary),
+                    const SizedBox(height: 16),
+                    Text('Loading video...', style: TextStyle(color: Colors.white70)),
+                  ],
+                ),
+              ),
+            )
+          else
+            // Image
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => _openImageViewer(context),
+                child: CachedNetworkImage(
+                  imageUrl: widget.imageUrl!,
+                  fit: BoxFit.contain,
+                  placeholder: (context, url) => _buildPlaceholder(context),
+                  errorWidget: (context, url, error) => _buildPlaceholder(context),
+                ),
+              ),
+            )
         else
           _buildPlaceholder(context),
 
         // Progress overlay
-        if (isGenerating)
+        if (widget.isGenerating)
           Container(
             color: Colors.black45,
             child: Center(
@@ -175,16 +271,16 @@ class GenerationPreview extends StatelessWidget {
                     children: [
                       SizedBox(
                         width: 200,
-                        child: LinearProgressIndicator(value: progress),
+                        child: LinearProgressIndicator(value: widget.progress),
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Generating...',
+                        isVideo ? 'Generating video...' : 'Generating...',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Step $currentStep / $totalSteps',
+                        'Step ${widget.currentStep} / ${widget.totalSteps}',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: colorScheme.outline,
                             ),
