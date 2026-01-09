@@ -41,8 +41,18 @@ class StorageService {
     return _box.get(key) as int?;
   }
 
+  /// Get an integer value (static alias)
+  static int? getIntStatic(String key) {
+    return _box.get(key) as int?;
+  }
+
   /// Set an integer value
   static Future<void> setInt(String key, int value) async {
+    await _box.put(key, value);
+  }
+
+  /// Set an integer value (static alias)
+  static Future<void> setIntStatic(String key, int value) async {
     await _box.put(key, value);
   }
 

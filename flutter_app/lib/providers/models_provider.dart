@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 
 /// Models state provider
 final modelsProvider =
     StateNotifierProvider<ModelsNotifier, ModelsState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return ModelsNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return ModelsNotifier(comfyService);
 });
 
 /// Selected model provider
@@ -26,6 +26,8 @@ class ModelsState {
   final List<ModelInfo> embeddings;
   final List<ModelInfo> textEncoders;
   final List<ModelInfo> diffusionModels;
+  final List<String> samplers;
+  final List<String> schedulers;
   final bool isLoading;
   final String? error;
 
@@ -37,6 +39,8 @@ class ModelsState {
     this.embeddings = const [],
     this.textEncoders = const [],
     this.diffusionModels = const [],
+    this.samplers = const [],
+    this.schedulers = const [],
     this.isLoading = false,
     this.error,
   });
@@ -90,6 +94,8 @@ class ModelsState {
     List<ModelInfo>? embeddings,
     List<ModelInfo>? textEncoders,
     List<ModelInfo>? diffusionModels,
+    List<String>? samplers,
+    List<String>? schedulers,
     bool? isLoading,
     String? error,
   }) {
@@ -101,6 +107,8 @@ class ModelsState {
       embeddings: embeddings ?? this.embeddings,
       textEncoders: textEncoders ?? this.textEncoders,
       diffusionModels: diffusionModels ?? this.diffusionModels,
+      samplers: samplers ?? this.samplers,
+      schedulers: schedulers ?? this.schedulers,
       isLoading: isLoading ?? this.isLoading,
       error: error,
     );
@@ -130,6 +138,15 @@ class ModelInfo {
     this.previewImage,
     this.metadata,
   });
+
+  /// Create ModelInfo from a simple model name string
+  factory ModelInfo.fromName(String name, String type) {
+    return ModelInfo(
+      name: name,
+      path: name,
+      type: type,
+    );
+  }
 
   factory ModelInfo.fromJson(Map<String, dynamic> json) {
     return ModelInfo(
@@ -181,36 +198,82 @@ class ModelInfo {
   }
 }
 
+/// Video model name patterns for filtering checkpoints
+const _videoModelPatterns = [
+  'ltx',
+  'wan',
+  'hunyuan',
+  'mochi',
+  'cogvideo',
+  'animatediff',
+  'svd',
+  'stable-video',
+  'stablevideo',
+  'video',
+  'i2v',
+  't2v',
+];
+
+/// Check if a model name matches video model patterns
+bool _isVideoModel(String name) {
+  final lowerName = name.toLowerCase();
+  return _videoModelPatterns.any((pattern) => lowerName.contains(pattern));
+}
+
 /// Models notifier
 class ModelsNotifier extends StateNotifier<ModelsState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  ModelsNotifier(this._apiService) : super(const ModelsState());
+  ModelsNotifier(this._comfyService) : super(const ModelsState());
 
-  /// Load all models
+  /// Load all models from ComfyUI
   Future<void> loadModels() async {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      // Load all model types in parallel
+      // Load all model types in parallel from ComfyUI
       final results = await Future.wait([
-        _loadModelType('Stable-Diffusion'),
-        _loadModelType('Lora'),
-        _loadModelType('VAE'),
-        _loadModelType('ControlNet'),
-        _loadModelType('Embedding'),
-        _loadModelType('clip'),
-        _loadDiffusionModels(),
+        _comfyService.getCheckpoints(),    // 0: checkpoints
+        _comfyService.getLoras(),          // 1: loras
+        _comfyService.getVAEs(),           // 2: vaes
+        _comfyService.getControlNets(),    // 3: controlnets
+        _comfyService.getEmbeddings(),     // 4: embeddings
+        _comfyService.getCLIPModels(),     // 5: text encoders (CLIP models)
+        _comfyService.getSamplers(),       // 6: samplers
+        _comfyService.getSchedulers(),     // 7: schedulers
       ]);
 
+      final checkpointNames = results[0] as List<String>;
+      final loraNames = results[1] as List<String>;
+      final vaeNames = results[2] as List<String>;
+      final controlnetNames = results[3] as List<String>;
+      final embeddingNames = results[4] as List<String>;
+      final clipNames = results[5] as List<String>;
+      final samplerNames = results[6] as List<String>;
+      final schedulerNames = results[7] as List<String>;
+
+      // Separate video models from regular checkpoints
+      final sdCheckpoints = <ModelInfo>[];
+      final videoModels = <ModelInfo>[];
+
+      for (final name in checkpointNames) {
+        if (_isVideoModel(name)) {
+          videoModels.add(ModelInfo.fromName(name, 'diffusion_model'));
+        } else {
+          sdCheckpoints.add(ModelInfo.fromName(name, 'checkpoint'));
+        }
+      }
+
       state = state.copyWith(
-        checkpoints: results[0],
-        loras: results[1],
-        vaes: results[2],
-        controlnets: results[3],
-        embeddings: results[4],
-        textEncoders: results[5],
-        diffusionModels: results[6],
+        checkpoints: sdCheckpoints,
+        loras: loraNames.map((n) => ModelInfo.fromName(n, 'lora')).toList(),
+        vaes: vaeNames.map((n) => ModelInfo.fromName(n, 'vae')).toList(),
+        controlnets: controlnetNames.map((n) => ModelInfo.fromName(n, 'controlnet')).toList(),
+        embeddings: embeddingNames.map((n) => ModelInfo.fromName(n, 'embedding')).toList(),
+        textEncoders: clipNames.map((n) => ModelInfo.fromName(n, 'text_encoder')).toList(),
+        diffusionModels: videoModels,
+        samplers: samplerNames,
+        schedulers: schedulerNames,
         isLoading: false,
       );
     } catch (e) {
@@ -221,57 +284,7 @@ class ModelsNotifier extends StateNotifier<ModelsState> {
     }
   }
 
-  /// Load diffusion models (video models, z_image, etc.)
-  Future<List<ModelInfo>> _loadDiffusionModels() async {
-    try {
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/ListDiffusionModels',
-        data: {},
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final files = response.data!['files'] as List<dynamic>?;
-        if (files != null) {
-          return files
-              .map((f) => ModelInfo.fromJson({
-                    ...f as Map<String, dynamic>,
-                    'type': 'diffusion_model',
-                  }))
-              .toList();
-        }
-      }
-      return [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /// Load specific model type
-  Future<List<ModelInfo>> _loadModelType(String type) async {
-    try {
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/API/ListModels',
-        data: {'path': '', 'depth': 10, 'subtype': type},
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final files = response.data!['files'] as List<dynamic>?;
-        if (files != null) {
-          return files
-              .map((f) => ModelInfo.fromJson({
-                    ...f as Map<String, dynamic>,
-                    'type': type,
-                  }))
-              .toList();
-        }
-      }
-      return [];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /// Refresh models
+  /// Refresh all models (alias for loadModels)
   Future<void> refresh() async {
     await loadModels();
   }

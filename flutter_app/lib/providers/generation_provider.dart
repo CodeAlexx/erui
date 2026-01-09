@@ -1,16 +1,14 @@
-import 'dart:async' show Timer;
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
-import 'session_provider.dart';
-import 'models_provider.dart';
+import '../services/comfyui_service.dart';
+import '../services/comfyui_workflow_builder.dart';
 import 'lora_provider.dart';
 
 /// Generation state provider
 final generationProvider =
     StateNotifierProvider<GenerationNotifier, GenerationState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  final session = ref.watch(sessionProvider);
-  return GenerationNotifier(apiService, session);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return GenerationNotifier(comfyService);
 });
 
 /// Generation parameters provider
@@ -71,79 +69,116 @@ class GenerationState {
   }
 }
 
-/// Generation notifier - uses polling for progress updates
+/// Generation notifier - uses ComfyUI directly for generation
 class GenerationNotifier extends StateNotifier<GenerationState> {
-  final ApiService _apiService;
-  final SessionState _session;
-  Timer? _pollTimer;
+  final ComfyUIService _comfyService;
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
+  StreamSubscription<ComfyExecutionError>? _errorSubscription;
+  String? _currentPromptId;
 
-  GenerationNotifier(this._apiService, this._session)
-      : super(const GenerationState());
+  GenerationNotifier(this._comfyService) : super(const GenerationState()) {
+    _setupListeners();
+  }
 
-  /// Poll progress for a generation
-  void _startPolling(String generationId) {
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
-      if (!state.isGenerating || state.generationId != generationId) {
-        timer.cancel();
-        return;
-      }
+  /// Set up WebSocket listeners for progress and errors
+  void _setupListeners() {
+    _progressSubscription = _comfyService.progressStream.listen(_handleProgress);
+    _errorSubscription = _comfyService.errorStream.listen(_handleError);
+  }
 
-      try {
-        final response = await _apiService.post<Map<String, dynamic>>(
-          '/api/GetProgress',
-          data: {'prompt_id': generationId},
+  /// Handle progress updates from ComfyUI WebSocket
+  void _handleProgress(ComfyProgressUpdate update) {
+    // Only handle updates for our current generation
+    if (_currentPromptId != null && update.promptId != _currentPromptId) {
+      return;
+    }
+
+    state = state.copyWith(
+      currentStep: update.currentStep,
+      totalSteps: update.totalSteps,
+      progress: update.totalSteps > 0 ? update.currentStep / update.totalSteps : 0,
+      currentImage: update.previewImage ?? state.currentImage,
+    );
+
+    if (update.isComplete && update.outputImages != null && update.outputImages!.isNotEmpty) {
+      state = state.copyWith(
+        isGenerating: false,
+        progress: 1.0,
+        generatedImages: update.outputImages,
+        currentImage: update.outputImages!.first,
+      );
+      _currentPromptId = null;
+    } else if (update.status == 'complete' && update.outputImages == null) {
+      // Execution complete but no images from WebSocket, fetch from history
+      _fetchOutputsFromHistory(update.promptId);
+    }
+  }
+
+  /// Handle execution errors from ComfyUI WebSocket
+  void _handleError(ComfyExecutionError error) {
+    if (_currentPromptId != null && error.promptId != _currentPromptId) {
+      return;
+    }
+
+    state = state.copyWith(
+      isGenerating: false,
+      error: 'Generation failed: ${error.message} (node: ${error.nodeType})',
+    );
+    _currentPromptId = null;
+  }
+
+  /// Fetch output images from history when WebSocket didn't provide them
+  Future<void> _fetchOutputsFromHistory(String promptId) async {
+    try {
+      final images = await _comfyService.getOutputImages(promptId);
+      if (images.isNotEmpty) {
+        state = state.copyWith(
+          isGenerating: false,
+          progress: 1.0,
+          generatedImages: images,
+          currentImage: images.first,
         );
-
-        if (response.isSuccess && response.data != null) {
-          final data = response.data!;
-          final status = data['status'] as String?;
-          print('Poll response: status=$status, data=$data');
-
-          if (status == 'completed') {
-            timer.cancel();
-            final imagesList = data['images'] as List? ?? [];
-            final fullUrls = imagesList.map((path) => '${_apiService.baseUrl}$path').cast<String>().toList();
-            print('Generation completed! Images: $fullUrls');
-            state = state.copyWith(
-              isGenerating: false,
-              progress: 1.0,
-              currentStep: state.totalSteps,
-              generatedImages: fullUrls,
-              currentImage: fullUrls.isNotEmpty ? fullUrls.first : null,
-            );
-          } else if (status == 'error') {
-            timer.cancel();
-            state = state.copyWith(
-              isGenerating: false,
-              error: data['error'] as String? ?? 'Generation failed',
-            );
-          } else if (status == 'generating' || status == 'queued') {
-            final step = data['step'] as int? ?? state.currentStep;
-            final total = data['total'] as int? ?? state.totalSteps;
-            state = state.copyWith(
-              currentStep: step,
-              totalSteps: total,
-              progress: total > 0 ? step / total : 0.0,
-            );
-          }
+      } else {
+        // Wait a bit and retry - history might not be ready yet
+        await Future.delayed(const Duration(milliseconds: 500));
+        final retryImages = await _comfyService.getOutputImages(promptId);
+        if (retryImages.isNotEmpty) {
+          state = state.copyWith(
+            isGenerating: false,
+            progress: 1.0,
+            generatedImages: retryImages,
+            currentImage: retryImages.first,
+          );
+        } else {
+          state = state.copyWith(
+            isGenerating: false,
+            error: 'Generation completed but no images found',
+          );
         }
-      } catch (e) {
-        print('Poll error: $e');
-        // Ignore poll errors, will retry
       }
-    });
+    } catch (e) {
+      state = state.copyWith(
+        isGenerating: false,
+        error: 'Failed to fetch output images: $e',
+      );
+    }
+    _currentPromptId = null;
   }
 
   /// Start generation
   Future<void> generate(GenerationParams params, {List<SelectedLora>? loras}) async {
-    if (_session.sessionId == null) {
-      state = state.copyWith(error: 'Not connected');
-      return;
+    // Check connection
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      // Try to connect
+      final connected = await _comfyService.connect();
+      if (!connected) {
+        state = state.copyWith(error: 'Not connected to ComfyUI');
+        return;
+      }
     }
 
-    // Cancel any existing polling
-    _pollTimer?.cancel();
+    // Cancel any previous tracking
+    _currentPromptId = null;
 
     state = state.copyWith(
       isGenerating: true,
@@ -156,110 +191,184 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
     );
 
     try {
-      // Use video model if in video mode, otherwise regular model
-      final modelToUse = params.videoMode ? (params.videoModel ?? params.model) : params.model;
+      // Build the appropriate workflow based on parameters
+      final workflow = _buildWorkflow(params, loras: loras);
 
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/GenerateText2ImageWS',
-        data: {
-          'session_id': _session.sessionId,
-          'prompt': params.prompt,
-          'negativeprompt': params.negativePrompt,
-          'model': modelToUse,
-          'width': params.width,
-          'height': params.height,
-          'steps': params.steps,
-          'cfgscale': params.cfgScale,
-          'seed': params.seed,
-          'sampler': params.sampler,
-          'scheduler': params.scheduler,
-          'images': params.batchSize,
-          if (loras != null && loras.isNotEmpty) 'loras': loras.map((l) => l.toJson()).toList(),
-          // Video parameters
-          if (params.videoMode) 'video_mode': true,
-          if (params.videoMode) 'frames': params.frames,
-          if (params.videoMode) 'fps': params.fps,
-          if (params.videoMode) 'video_format': params.videoFormat,
-          if (params.videoMode && params.highNoiseModel != null) 'high_noise_model': params.highNoiseModel,
-          if (params.videoMode && params.lowNoiseModel != null) 'low_noise_model': params.lowNoiseModel,
-          // I2V parameters - send augmentation level when init image is set with video mode
-          if (params.videoMode && params.initImage != null) 'videoaugmentationlevel': params.videoAugmentationLevel,
-          // Variation seed parameters
-          if (params.variationSeed != null) 'variationseed': params.variationSeed,
-          if (params.variationStrength > 0) 'variationseedstrength': params.variationStrength,
-          // Init image (img2img) parameters
-          if (params.initImage != null) 'initimage': params.initImage,
-          if (params.initImage != null) 'initimagecreativity': params.initImageCreativity,
-          // Refine/Upscale parameters
-          if (params.refinerModel != null && params.refinerModel != 'None') 'refinermodel': params.refinerModel,
-          if (params.upscaleFactor > 1.0) 'upscale': params.upscaleFactor,
-          if (params.refinerModel != null && params.refinerModel != 'None') 'refinersteps': params.refinerSteps,
-          // ControlNet parameters
-          if (params.controlNetImage != null) 'controlnetimage': params.controlNetImage,
-          if (params.controlNetModel != null && params.controlNetModel != 'None') 'controlnetmodel': params.controlNetModel,
-          if (params.controlNetModel != null && params.controlNetModel != 'None') 'controlnetstrength': params.controlNetStrength,
-          // Advanced model addons
-          if (params.vae != null && params.vae != 'Automatic') 'vae': params.vae,
-          if (params.textEncoder != null && params.textEncoder != 'Default') 'textencoder': params.textEncoder,
-          if (params.precision != null && params.precision != 'Automatic') 'modelprecision': params.precision,
-          ...params.extraParams,
-        },
-      );
+      // Queue the prompt
+      final promptId = await _comfyService.queuePrompt(workflow);
 
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        final generationId = data['generation_id'] as String?;
-
-        // Handle async generation (status='generating') - start polling
-        if (data['status'] == 'generating' && generationId != null) {
-          state = state.copyWith(generationId: generationId);
-          _startPolling(generationId);
-        }
-        // Handle synchronous completion (status='completed')
-        else if (data['status'] == 'completed' && data['images'] != null) {
-          final images = (data['images'] as List).cast<String>();
-          final fullUrls = images.map((path) => '${_apiService.baseUrl}$path').toList();
-          state = state.copyWith(
-            isGenerating: false,
-            progress: 1.0,
-            currentStep: params.steps,
-            generatedImages: fullUrls,
-            currentImage: fullUrls.isNotEmpty ? fullUrls.first : null,
-            generationId: generationId,
-          );
-        } else {
-          state = state.copyWith(generationId: generationId);
-        }
-      } else {
+      if (promptId == null) {
         state = state.copyWith(
           isGenerating: false,
-          error: response.error ?? 'Failed to start generation',
+          error: 'Failed to queue generation - no prompt ID returned',
         );
+        return;
       }
+
+      _currentPromptId = promptId;
+      state = state.copyWith(generationId: promptId);
+
+      print('ComfyUI generation queued: $promptId');
+
     } catch (e) {
       state = state.copyWith(
         isGenerating: false,
-        error: e.toString(),
+        error: 'Generation error: $e',
+      );
+    }
+  }
+
+  /// Build ComfyUI workflow from generation parameters
+  Map<String, dynamic> _buildWorkflow(GenerationParams params, {List<SelectedLora>? loras}) {
+    final builder = ComfyUIWorkflowBuilder();
+
+    // Convert SelectedLora to LoraConfig
+    List<LoraConfig>? loraConfigs;
+    if (loras != null && loras.isNotEmpty) {
+      loraConfigs = loras.map((l) => LoraConfig(
+        name: l.lora.name,
+        modelStrength: l.strength,
+        clipStrength: l.strength,
+      )).toList();
+    }
+
+    // Build FreeU config from extraParams if present
+    FreeUConfig? freeUConfig;
+    if (params.extraParams.containsKey('freeu_b1') ||
+        params.extraParams.containsKey('freeub1')) {
+      freeUConfig = FreeUConfig(
+        b1: (params.extraParams['freeu_b1'] ?? params.extraParams['freeub1'] ?? 1.3) as double,
+        b2: (params.extraParams['freeu_b2'] ?? params.extraParams['freeub2'] ?? 1.4) as double,
+        s1: (params.extraParams['freeu_s1'] ?? params.extraParams['freeus1'] ?? 0.9) as double,
+        s2: (params.extraParams['freeu_s2'] ?? params.extraParams['freeus2'] ?? 0.2) as double,
+      );
+    }
+
+    // Build ControlNet config if present
+    ControlNetConfig? controlNetConfig;
+    if (params.controlNetImage != null &&
+        params.controlNetModel != null &&
+        params.controlNetModel != 'None') {
+      controlNetConfig = ControlNetConfig(
+        model: params.controlNetModel!,
+        imageBase64: params.controlNetImage!,
+        strength: params.controlNetStrength,
+      );
+    }
+
+    // Get the model to use
+    final modelToUse = params.videoMode
+        ? (params.videoModel ?? params.model ?? '')
+        : (params.model ?? '');
+
+    if (modelToUse.isEmpty) {
+      throw Exception('No model selected');
+    }
+
+    // Choose workflow type based on parameters
+    if (params.videoMode) {
+      // Video generation workflow
+      return builder.buildVideo(
+        model: modelToUse,
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        width: params.width,
+        height: params.height,
+        frames: params.frames,
+        fps: params.fps,
+        steps: params.steps,
+        cfg: params.cfgScale,
+        seed: params.seed,
+        sampler: params.sampler,
+        scheduler: params.scheduler,
+        vae: params.vae,
+        initImageBase64: params.initImage,
+        denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+        filenamePrefix: 'ERI_video',
+        outputFormat: params.videoFormat == 'mp4' ? 'video/h264-mp4' : 'image/gif',
+      );
+    } else if (params.refinerModel != null &&
+               params.refinerModel != 'None' &&
+               params.refinerModel!.isNotEmpty) {
+      // SDXL with refiner workflow
+      return builder.buildSDXLWithRefiner(
+        baseModel: modelToUse,
+        refinerModel: params.refinerModel!,
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        width: params.width,
+        height: params.height,
+        baseSteps: params.steps,
+        refinerSteps: params.refinerSteps,
+        baseCfg: params.cfgScale,
+        refinerCfg: params.cfgScale,
+        seed: params.seed,
+        sampler: params.sampler,
+        scheduler: params.scheduler,
+        vae: params.vae,
+        loras: loraConfigs,
+        filenamePrefix: 'ERI_refiner',
+      );
+    } else if (params.upscaleFactor > 1.0 && params.initImage != null) {
+      // Hires fix / upscale workflow
+      return builder.buildHiresFix(
+        model: modelToUse,
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        width: params.width,
+        height: params.height,
+        steps: params.steps,
+        cfg: params.cfgScale,
+        seed: params.seed,
+        sampler: params.sampler,
+        scheduler: params.scheduler,
+        vae: params.vae,
+        loras: loraConfigs,
+        upscaleBy: params.upscaleFactor,
+        hiresSteps: params.refinerSteps,
+        hiresDenoise: params.initImageCreativity,
+        freeU: freeUConfig,
+        filenamePrefix: 'ERI_hires',
+      );
+    } else {
+      // Standard text2image workflow (also handles img2img)
+      return builder.buildText2Image(
+        model: modelToUse,
+        prompt: params.prompt,
+        negativePrompt: params.negativePrompt,
+        width: params.width,
+        height: params.height,
+        steps: params.steps,
+        cfg: params.cfgScale,
+        seed: params.seed,
+        sampler: params.sampler,
+        scheduler: params.scheduler,
+        batchSize: params.batchSize,
+        vae: params.vae,
+        loras: loraConfigs,
+        initImageBase64: params.initImage,
+        denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+        controlNet: controlNetConfig,
+        freeU: freeUConfig,
+        filenamePrefix: 'ERI',
       );
     }
   }
 
   /// Cancel current generation
   Future<void> cancel() async {
-    _pollTimer?.cancel();
-    if (state.generationId == null) return;
+    if (!state.isGenerating) return;
 
     try {
-      await _apiService.post('/api/InterruptGeneration', data: {
-        'session_id': _session.sessionId,
-        'generation_id': state.generationId,
-      });
+      await _comfyService.interrupt();
       state = state.copyWith(
         isGenerating: false,
         error: 'Generation cancelled',
       );
+      _currentPromptId = null;
     } catch (e) {
       // Ignore cancel errors
+      print('Cancel error (ignored): $e');
     }
   }
 
@@ -270,7 +379,8 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _progressSubscription?.cancel();
+    _errorSubscription?.cancel();
     super.dispose();
   }
 }

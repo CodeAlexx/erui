@@ -1,219 +1,159 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 import '../services/storage_service.dart';
 
-/// Session state provider
+/// Session state provider - manages ComfyUI connection
 final sessionProvider =
     StateNotifierProvider<SessionNotifier, SessionState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return SessionNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return SessionNotifier(comfyService);
 });
 
-/// Session state
+/// Session state - tracks ComfyUI connection
 class SessionState {
-  final String? sessionId;
-  final String? userId;
-  final String? username;
-  final List<String> permissions;
-  final bool isAuthenticated;
+  final String? sessionId;  // ComfyUI client_id (optional)
+  final String host;
+  final int port;
+  final bool isConnected;
   final bool isLoading;
   final String? error;
 
+  // For backwards compatibility with SwarmUI-style code
+  final String? userId;
+  final String? username;
+
   const SessionState({
     this.sessionId,
-    this.userId,
-    this.username,
-    this.permissions = const [],
-    this.isAuthenticated = false,
+    this.host = 'localhost',
+    this.port = 8188,
+    this.isConnected = false,
     this.isLoading = false,
     this.error,
+    this.userId,
+    this.username,
   });
 
   SessionState copyWith({
     String? sessionId,
-    String? userId,
-    String? username,
-    List<String>? permissions,
-    bool? isAuthenticated,
+    String? host,
+    int? port,
+    bool? isConnected,
     bool? isLoading,
     String? error,
+    String? userId,
+    String? username,
   }) {
     return SessionState(
       sessionId: sessionId ?? this.sessionId,
-      userId: userId ?? this.userId,
-      username: username ?? this.username,
-      permissions: permissions ?? this.permissions,
-      isAuthenticated: isAuthenticated ?? this.isAuthenticated,
+      host: host ?? this.host,
+      port: port ?? this.port,
+      isConnected: isConnected ?? this.isConnected,
       isLoading: isLoading ?? this.isLoading,
       error: error,
+      userId: userId ?? this.userId,
+      username: username ?? this.username,
     );
   }
 
-  /// Check if user has a specific permission
-  bool hasPermission(String permission) {
-    return permissions.contains(permission) || permissions.contains('*');
-  }
+  /// For backwards compatibility
+  bool get isAuthenticated => isConnected;
+  List<String> get permissions => isConnected ? ['*'] : [];
+  bool hasPermission(String permission) => isConnected;
 }
 
-/// Session notifier
+/// Session notifier - manages ComfyUI connection
 class SessionNotifier extends StateNotifier<SessionState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  SessionNotifier(this._apiService) : super(const SessionState()) {
-    _initSession();
+  SessionNotifier(this._comfyService) : super(const SessionState()) {
+    _initConnection();
+    _listenToConnectionState();
   }
 
-  /// Initialize session - load saved or create new
-  Future<void> _initSession() async {
-    final savedId = StorageService.getStringStatic('session_id');
-    if (savedId != null) {
-      state = state.copyWith(sessionId: savedId, isAuthenticated: true);
-    } else {
-      // Auto-create session on startup
-      await createSession();
-    }
+  /// Initialize connection from saved settings
+  Future<void> _initConnection() async {
+    final savedHost = StorageService.getStringStatic('comfy_host') ?? 'localhost';
+    final savedPort = StorageService.getIntStatic('comfy_port') ?? 8188;
+
+    state = state.copyWith(host: savedHost, port: savedPort);
+    _comfyService.configure(host: savedHost, port: savedPort);
+
+    // Auto-connect on startup
+    await connect();
   }
 
-  /// Load saved session
-  Future<void> _loadSavedSession() async {
-    final sessionId = StorageService.getStringStatic('session_id');
-    if (sessionId != null) {
-      state = state.copyWith(sessionId: sessionId, isLoading: true);
-      await _validateSession(sessionId);
-    }
-  }
-
-  /// Validate existing session
-  Future<bool> _validateSession(String sessionId) async {
-    try {
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/ValidateSession',
-        data: {'session_id': sessionId},
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        state = state.copyWith(
-          sessionId: sessionId,
-          userId: data['user_id'] as String?,
-          username: data['username'] as String?,
-          permissions: (data['permissions'] as List<dynamic>?)
-                  ?.map((e) => e as String)
-                  .toList() ??
-              [],
-          isAuthenticated: true,
-          isLoading: false,
-        );
-        return true;
-      } else {
-        await _clearSession();
-        return false;
+  /// Listen to connection state changes
+  void _listenToConnectionState() {
+    _comfyService.connectionState.listen((comfyState) {
+      switch (comfyState) {
+        case ComfyConnectionState.connected:
+          state = state.copyWith(isConnected: true, isLoading: false, error: null);
+          break;
+        case ComfyConnectionState.disconnected:
+          state = state.copyWith(isConnected: false, isLoading: false);
+          break;
+        case ComfyConnectionState.connecting:
+          state = state.copyWith(isLoading: true, error: null);
+          break;
+        case ComfyConnectionState.error:
+          state = state.copyWith(isConnected: false, isLoading: false);
+          break;
       }
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
-    }
+    });
   }
 
-  /// Create new session
-  Future<bool> createSession() async {
+  /// Connect to ComfyUI
+  Future<bool> connect() async {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      final response = await _apiService.get<Map<String, dynamic>>(
-        '/API/GetNewSession',
-      );
+      final success = await _comfyService.connect();
 
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        final sessionId = data['session_id'] as String;
-
-        await StorageService.setStringStatic('session_id', sessionId);
-
-        state = state.copyWith(
-          sessionId: sessionId,
-          permissions: (data['permissions'] as List<dynamic>?)
-                  ?.map((e) => e as String)
-                  .toList() ??
-              ['user', 'generate'],
-          isAuthenticated: true,
-          isLoading: false,
-        );
+      if (success) {
+        state = state.copyWith(isConnected: true, isLoading: false);
         return true;
       } else {
         state = state.copyWith(
+          isConnected: false,
           isLoading: false,
-          error: response.error ?? 'Failed to create session',
+          error: 'Failed to connect to ComfyUI at ${state.host}:${state.port}',
         );
         return false;
       }
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
-    }
-  }
-
-  /// Login with username and password
-  Future<bool> login(String username, String password) async {
-    state = state.copyWith(isLoading: true, error: null);
-
-    try {
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/Login',
-        data: {
-          'username': username,
-          'password': password,
-        },
+      state = state.copyWith(
+        isConnected: false,
+        isLoading: false,
+        error: e.toString(),
       );
-
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        final sessionId = data['session_id'] as String;
-
-        await StorageService.setStringStatic('session_id', sessionId);
-
-        state = state.copyWith(
-          sessionId: sessionId,
-          userId: data['user_id'] as String?,
-          username: data['username'] as String?,
-          permissions: (data['permissions'] as List<dynamic>?)
-                  ?.map((e) => e as String)
-                  .toList() ??
-              [],
-          isAuthenticated: true,
-          isLoading: false,
-        );
-        return true;
-      } else {
-        state = state.copyWith(
-          isLoading: false,
-          error: response.error ?? 'Login failed',
-        );
-        return false;
-      }
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
       return false;
     }
   }
 
-  /// Logout
-  Future<void> logout() async {
-    if (state.sessionId != null) {
-      try {
-        await _apiService.post('/api/Logout', data: {
-          'session_id': state.sessionId,
-        });
-      } catch (e) {
-        // Ignore logout errors
-      }
-    }
-    await _clearSession();
+  /// Configure and connect to a different ComfyUI instance
+  Future<bool> configureAndConnect({required String host, required int port}) async {
+    // Save settings
+    await StorageService.setStringStatic('comfy_host', host);
+    await StorageService.setIntStatic('comfy_port', port);
+
+    state = state.copyWith(host: host, port: port);
+    _comfyService.configure(host: host, port: port);
+
+    return connect();
   }
 
-  /// Clear session
-  Future<void> _clearSession() async {
-    await StorageService.remove('session_id');
-    state = const SessionState();
+  /// Disconnect
+  Future<void> disconnect() async {
+    await _comfyService.disconnect();
+    state = state.copyWith(isConnected: false);
   }
+
+  /// For backwards compatibility - createSession just connects
+  Future<bool> createSession() async => connect();
+
+  /// For backwards compatibility - login not needed for ComfyUI
+  Future<bool> login(String username, String password) async => connect();
+
+  /// For backwards compatibility - logout just disconnects
+  Future<void> logout() async => disconnect();
 }
