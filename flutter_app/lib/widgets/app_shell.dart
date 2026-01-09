@@ -34,6 +34,11 @@ class AppShell extends StatelessWidget {
                   onTap: () => context.go('/generate'),
                 ),
                 _TopTab(
+                  label: 'Editor',
+                  isSelected: location.startsWith('/editor'),
+                  onTap: () => context.go('/editor'),
+                ),
+                _TopTab(
                   label: 'ComfyUI',
                   isSelected: location.startsWith('/comfyui'),
                   onTap: () => context.go('/comfyui'),

@@ -49,6 +49,9 @@ dependencies:
   window_manager: ^0.3.8
   desktop_drop: ^0.4.4
 
+  # Video/FFmpeg support
+  ffmpeg_kit_flutter_full: ^6.0.3
+
   # Routing
   go_router: ^13.1.0
   flex_color_scheme: ^8.0.2

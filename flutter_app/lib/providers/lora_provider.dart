@@ -29,6 +29,23 @@ final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
   return allModels;
 });
 
+/// LoRA filter text provider
+final loraFilterProvider = StateProvider<String>((ref) => '');
+
+/// Filtered LoRA list based on search
+final filteredLoraListProvider = Provider<AsyncValue<List<LoraModel>>>((ref) {
+  final filter = ref.watch(loraFilterProvider).toLowerCase();
+  final lorasAsync = ref.watch(loraListProvider);
+  return lorasAsync.whenData((loras) {
+    if (filter.isEmpty) return loras;
+    return loras.where((lora) {
+      return lora.name.toLowerCase().contains(filter) ||
+             lora.title.toLowerCase().contains(filter) ||
+             (lora.baseModel?.toLowerCase().contains(filter) ?? false);
+    }).toList();
+  });
+});
+
 /// Selected LoRAs provider
 final selectedLorasProvider = StateNotifierProvider<SelectedLorasNotifier, List<SelectedLora>>((ref) {
   return SelectedLorasNotifier();

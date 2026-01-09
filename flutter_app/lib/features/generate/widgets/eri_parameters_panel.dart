@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../providers/providers.dart';
+import '../../regional/regional_prompt_editor.dart';
+import 'init_image_panel.dart';
+import 'variation_panel.dart';
+import 'controlnet_panel.dart';
 
 /// ERI-style parameters panel with collapsible sections
 /// Matches SwarmUI parameter layout with "Display Advanced Options" toggle
@@ -203,7 +207,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     icon: Icons.grid_view,
                     isExpanded: _regionalPromptingExpanded,
                     onToggle: () => setState(() => _regionalPromptingExpanded = !_regionalPromptingExpanded),
-                    child: _PlaceholderContent('Regional prompt settings'),
+                    child: const SizedBox(height: 300, child: RegionalPromptEditor()),
                   ),
 
                   // Segment Refining
@@ -212,7 +216,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     icon: Icons.auto_awesome_mosaic,
                     isExpanded: _segmentRefiningExpanded,
                     onToggle: () => setState(() => _segmentRefiningExpanded = !_segmentRefiningExpanded),
-                    child: _PlaceholderContent('Segment-based refinement'),
+                    child: _SegmentRefiningContent(),
                   ),
 
                   // ComfyUI
@@ -221,7 +225,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     icon: Icons.account_tree,
                     isExpanded: _comfyUIExpanded,
                     onToggle: () => setState(() => _comfyUIExpanded = !_comfyUIExpanded),
-                    child: _PlaceholderContent('Custom ComfyUI workflows'),
+                    child: _ComfyUIContent(),
                   ),
 
                   // Dynamic Thresholding
@@ -231,7 +235,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     isExpanded: _dynamicThresholdingExpanded,
                     hasToggle: true,
                     onToggle: () => setState(() => _dynamicThresholdingExpanded = !_dynamicThresholdingExpanded),
-                    child: _PlaceholderContent('CFG rescaling'),
+                    child: _DynamicThresholdingContent(),
                   ),
 
                   // FreeU
@@ -241,7 +245,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     isExpanded: _freeUExpanded,
                     hasToggle: true,
                     onToggle: () => setState(() => _freeUExpanded = !_freeUExpanded),
-                    child: _PlaceholderContent('FreeU enhancement'),
+                    child: _FreeUContent(),
                   ),
 
                   // Scoring
@@ -251,7 +255,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     isExpanded: _scoringExpanded,
                     hasToggle: true,
                     onToggle: () => setState(() => _scoringExpanded = !_scoringExpanded),
-                    child: _PlaceholderContent('Automatic image scoring'),
+                    child: _ScoringContent(),
                   ),
 
                   // Advanced Sampling
@@ -260,7 +264,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     icon: Icons.science,
                     isExpanded: _advancedSamplingExpanded,
                     onToggle: () => setState(() => _advancedSamplingExpanded = !_advancedSamplingExpanded),
-                    child: _PlaceholderContent('Sigma, VAE tiling, etc.'),
+                    child: _AdvancedSamplingContent(),
                   ),
 
                   // Other Fixes
@@ -269,7 +273,7 @@ class _EriParametersPanelState extends ConsumerState<EriParametersPanel> {
                     icon: Icons.build,
                     isExpanded: _otherFixesExpanded,
                     onToggle: () => setState(() => _otherFixesExpanded = !_otherFixesExpanded),
-                    child: _PlaceholderContent('Video trimming and other fixes'),
+                    child: _OtherFixesContent(),
                   ),
                 ],
               ],
@@ -470,27 +474,396 @@ class _CoreParametersSection extends StatelessWidget {
   }
 }
 
-/// Placeholder content for sections not yet implemented
-class _PlaceholderContent extends StatelessWidget {
-  final String description;
-
-  const _PlaceholderContent(this.description);
-
+/// Segment Refining content - mask-based regional refinement
+class _SegmentRefiningContent extends ConsumerWidget {
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Enable toggle
+          SwitchListTile(
+            title: const Text('Enable Segment Refining', style: TextStyle(fontSize: 12)),
+            value: params.extraParams['segment_refine_enabled'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('segment_refine_enabled', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: 8),
+          // Refine strength
+          _ParameterSlider(
+            label: 'Refine Strength',
+            value: (params.extraParams['segment_refine_strength'] as double?) ?? 0.5,
+            min: 0.0,
+            max: 1.0,
+            divisions: 20,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('segment_refine_strength', v),
+          ),
+          const SizedBox(height: 8),
+          // Refine steps
+          _ParameterSlider(
+            label: 'Refine Steps',
+            value: ((params.extraParams['segment_refine_steps'] as int?) ?? 10).toDouble(),
+            min: 1,
+            max: 50,
+            divisions: 49,
+            decimals: 0,
+            onChanged: (v) => paramsNotifier.setExtraParam('segment_refine_steps', v.toInt()),
+          ),
+          const SizedBox(height: 8),
+          // Segment mode
+          _ParameterDropdown(
+            label: 'Segment Mode',
+            value: (params.extraParams['segment_mode'] as String?) ?? 'face',
+            items: const ['face', 'person', 'background', 'custom_mask'],
+            onChanged: (v) => paramsNotifier.setExtraParam('segment_mode', v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ComfyUI Workflows content
+class _ComfyUIContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: Center(
-        child: Text(
-          description,
-          style: TextStyle(
-            fontSize: 12,
-            color: colorScheme.onSurfaceVariant,
-            fontStyle: FontStyle.italic,
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Workflow selector button
+          OutlinedButton.icon(
+            onPressed: () {
+              // Navigate to ComfyUI workflow screen
+              Navigator.of(context).pushNamed('/comfy-workflow');
+            },
+            icon: const Icon(Icons.account_tree, size: 16),
+            label: const Text('Open Workflow Editor'),
           ),
-        ),
+          const SizedBox(height: 8),
+          // Quick workflow dropdown
+          _ParameterDropdown(
+            label: 'Quick Workflow',
+            value: 'default',
+            items: const ['default', 'hires_fix', 'upscale_2x', 'face_restore', 'custom'],
+            onChanged: (v) {},
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Use ComfyUI workflows for advanced generation pipelines',
+            style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Dynamic Thresholding content - CFG rescaling
+class _DynamicThresholdingContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Mimic Scale
+          _ParameterSlider(
+            label: 'Mimic Scale',
+            value: (params.extraParams['dt_mimic_scale'] as double?) ?? 7.0,
+            min: 1.0,
+            max: 30.0,
+            divisions: 58,
+            decimals: 1,
+            onChanged: (v) => paramsNotifier.setExtraParam('dt_mimic_scale', v),
+          ),
+          const SizedBox(height: 8),
+          // Threshold Percentile
+          _ParameterSlider(
+            label: 'Threshold Percentile',
+            value: (params.extraParams['dt_threshold_percentile'] as double?) ?? 1.0,
+            min: 0.9,
+            max: 1.0,
+            divisions: 10,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('dt_threshold_percentile', v),
+          ),
+          const SizedBox(height: 8),
+          // Mimic Mode
+          _ParameterDropdown(
+            label: 'Mimic Mode',
+            value: (params.extraParams['dt_mimic_mode'] as String?) ?? 'Constant',
+            items: const ['Constant', 'Linear Down', 'Cosine Down', 'Half Cosine Down'],
+            onChanged: (v) => paramsNotifier.setExtraParam('dt_mimic_mode', v),
+          ),
+          const SizedBox(height: 8),
+          // CFG Mode
+          _ParameterDropdown(
+            label: 'CFG Mode',
+            value: (params.extraParams['dt_cfg_mode'] as String?) ?? 'Constant',
+            items: const ['Constant', 'Linear Down', 'Cosine Down', 'Half Cosine Down'],
+            onChanged: (v) => paramsNotifier.setExtraParam('dt_cfg_mode', v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// FreeU content - backbone/skip enhancement
+class _FreeUContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Backbone Scale 1
+          _ParameterSlider(
+            label: 'Backbone Scale 1',
+            value: (params.extraParams['freeu_b1'] as double?) ?? 1.1,
+            min: 0.0,
+            max: 2.0,
+            divisions: 40,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('freeu_b1', v),
+          ),
+          const SizedBox(height: 8),
+          // Backbone Scale 2
+          _ParameterSlider(
+            label: 'Backbone Scale 2',
+            value: (params.extraParams['freeu_b2'] as double?) ?? 1.2,
+            min: 0.0,
+            max: 2.0,
+            divisions: 40,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('freeu_b2', v),
+          ),
+          const SizedBox(height: 8),
+          // Skip Scale 1
+          _ParameterSlider(
+            label: 'Skip Scale 1',
+            value: (params.extraParams['freeu_s1'] as double?) ?? 0.9,
+            min: 0.0,
+            max: 2.0,
+            divisions: 40,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('freeu_s1', v),
+          ),
+          const SizedBox(height: 8),
+          // Skip Scale 2
+          _ParameterSlider(
+            label: 'Skip Scale 2',
+            value: (params.extraParams['freeu_s2'] as double?) ?? 0.2,
+            min: 0.0,
+            max: 2.0,
+            divisions: 40,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('freeu_s2', v),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Scoring content - automatic image quality scoring
+class _ScoringContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Aesthetic score threshold
+          _ParameterSlider(
+            label: 'Min Aesthetic Score',
+            value: (params.extraParams['min_aesthetic_score'] as double?) ?? 0.0,
+            min: 0.0,
+            max: 10.0,
+            divisions: 100,
+            decimals: 1,
+            onChanged: (v) => paramsNotifier.setExtraParam('min_aesthetic_score', v),
+          ),
+          const SizedBox(height: 8),
+          // Artifact detection
+          SwitchListTile(
+            title: const Text('Detect Artifacts', style: TextStyle(fontSize: 12)),
+            subtitle: Text('Flag images with hands/face issues', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+            value: params.extraParams['detect_artifacts'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('detect_artifacts', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          // Auto-discard bad images
+          SwitchListTile(
+            title: const Text('Auto-Discard Failed', style: TextStyle(fontSize: 12)),
+            subtitle: Text('Automatically regenerate low-score images', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+            value: params.extraParams['auto_discard_low_score'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('auto_discard_low_score', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Advanced Sampling content
+class _AdvancedSamplingContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Sigma Min
+          _ParameterSlider(
+            label: 'Sigma Min',
+            value: (params.extraParams['sigma_min'] as double?) ?? 0.0,
+            min: 0.0,
+            max: 1.0,
+            divisions: 100,
+            decimals: 3,
+            onChanged: (v) => paramsNotifier.setExtraParam('sigma_min', v),
+          ),
+          const SizedBox(height: 8),
+          // Sigma Max
+          _ParameterSlider(
+            label: 'Sigma Max',
+            value: (params.extraParams['sigma_max'] as double?) ?? 14.6,
+            min: 0.0,
+            max: 20.0,
+            divisions: 200,
+            decimals: 1,
+            onChanged: (v) => paramsNotifier.setExtraParam('sigma_max', v),
+          ),
+          const SizedBox(height: 8),
+          // Noise Offset
+          _ParameterSlider(
+            label: 'Noise Offset',
+            value: (params.extraParams['noise_offset'] as double?) ?? 0.0,
+            min: 0.0,
+            max: 1.0,
+            divisions: 100,
+            decimals: 2,
+            onChanged: (v) => paramsNotifier.setExtraParam('noise_offset', v),
+          ),
+          const SizedBox(height: 8),
+          // VAE Tiling
+          SwitchListTile(
+            title: const Text('VAE Tiling', style: TextStyle(fontSize: 12)),
+            value: params.extraParams['vae_tiling'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('vae_tiling', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          // VAE Slicing
+          SwitchListTile(
+            title: const Text('VAE Slicing', style: TextStyle(fontSize: 12)),
+            value: params.extraParams['vae_slicing'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('vae_slicing', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Other Fixes content
+class _OtherFixesContent extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Video frame interpolation
+          SwitchListTile(
+            title: const Text('Frame Interpolation', style: TextStyle(fontSize: 12)),
+            subtitle: Text('RIFE interpolation for smoother video', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+            value: params.extraParams['frame_interpolation'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('frame_interpolation', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+          // Interpolation factor
+          if (params.extraParams['frame_interpolation'] == true)
+            _ParameterDropdown(
+              label: 'Interpolation Factor',
+              value: (params.extraParams['interpolation_factor'] as String?) ?? '2x',
+              items: const ['2x', '4x', '8x'],
+              onChanged: (v) => paramsNotifier.setExtraParam('interpolation_factor', v),
+            ),
+          const SizedBox(height: 8),
+          // Video trim start
+          _ParameterSlider(
+            label: 'Trim Start (frames)',
+            value: ((params.extraParams['trim_start'] as int?) ?? 0).toDouble(),
+            min: 0,
+            max: 50,
+            divisions: 50,
+            decimals: 0,
+            onChanged: (v) => paramsNotifier.setExtraParam('trim_start', v.toInt()),
+          ),
+          const SizedBox(height: 8),
+          // Video trim end
+          _ParameterSlider(
+            label: 'Trim End (frames)',
+            value: ((params.extraParams['trim_end'] as int?) ?? 0).toDouble(),
+            min: 0,
+            max: 50,
+            divisions: 50,
+            decimals: 0,
+            onChanged: (v) => paramsNotifier.setExtraParam('trim_end', v.toInt()),
+          ),
+          const SizedBox(height: 8),
+          // Face restore
+          SwitchListTile(
+            title: const Text('Auto Face Restore', style: TextStyle(fontSize: 12)),
+            subtitle: Text('Apply GFPGAN/CodeFormer after generation', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+            value: params.extraParams['auto_face_restore'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('auto_face_restore', v),
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ],
       ),
     );
   }

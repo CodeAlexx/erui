@@ -11,6 +11,12 @@ final modelsProvider =
 /// Selected model provider
 final selectedModelProvider = StateProvider<ModelInfo?>((ref) => null);
 
+/// Model filter text provider
+final modelFilterProvider = StateProvider<String>((ref) => '');
+
+/// VAE filter text provider
+final vaeFilterProvider = StateProvider<String>((ref) => '');
+
 /// Models state
 class ModelsState {
   final List<ModelInfo> checkpoints;
@@ -244,7 +250,7 @@ class ModelsNotifier extends StateNotifier<ModelsState> {
   Future<List<ModelInfo>> _loadModelType(String type) async {
     try {
       final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/ListModels',
+        '/API/ListModels',
         data: {'path': '', 'depth': 10, 'subtype': type},
       );
 

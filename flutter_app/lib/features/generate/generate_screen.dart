@@ -5,8 +5,13 @@ import '../../providers/providers.dart';
 import '../../widgets/widgets.dart';
 import 'widgets/eri_parameters_panel.dart';
 import 'widgets/eri_bottom_panel.dart';
-import 'widgets/prompt_bar.dart';
+import 'widgets/autocomplete_prompt_field.dart';
 import 'widgets/image_metadata_panel.dart';
+
+/// Panel width providers for resizable panels
+final leftPanelWidthProvider = StateProvider<double>((ref) => 320);
+final rightPanelWidthProvider = StateProvider<double>((ref) => 300);
+final bottomPanelHeightProvider = StateProvider<double>((ref) => 200);
 
 /// Main image generation screen - ERI style layout
 class GenerateScreen extends ConsumerStatefulWidget {
@@ -18,6 +23,9 @@ class GenerateScreen extends ConsumerStatefulWidget {
 
 class _GenerateScreenState extends ConsumerState<GenerateScreen> {
   bool _wasGenerating = false;
+  bool _isDraggingLeft = false;
+  bool _isDraggingRight = false;
+  bool _isDraggingBottom = false;
 
   @override
   void initState() {
@@ -54,16 +62,32 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkGenerationComplete());
 
+    final leftWidth = ref.watch(leftPanelWidthProvider);
+    final rightWidth = ref.watch(rightPanelWidthProvider);
+    final bottomHeight = ref.watch(bottomPanelHeightProvider);
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
       children: [
         // Main content area
         Expanded(
           child: Row(
             children: [
-              // Left panel - Scrollable parameters
+              // Left panel - Scrollable parameters (resizable)
               SizedBox(
-                width: 320,
+                width: leftWidth,
                 child: EriParametersPanel(),
+              ),
+              // Left resize handle
+              _ResizeHandle(
+                isVertical: true,
+                isDragging: _isDraggingLeft,
+                onDragStart: () => setState(() => _isDraggingLeft = true),
+                onDragEnd: () => setState(() => _isDraggingLeft = false),
+                onDragUpdate: (dx) {
+                  final newWidth = (leftWidth + dx).clamp(200.0, 500.0);
+                  ref.read(leftPanelWidthProvider.notifier).state = newWidth;
+                },
               ),
               // Center column - Image preview + Prompt bar
               Expanded(
@@ -93,21 +117,46 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
                         }),
                       ),
                     ),
-                    // Prompt bar - above bottom tabs
-                    const PromptBar(),
+                    // Prompt bar with autocomplete - above bottom tabs
+                    const AutocompletePromptBar(),
                   ],
                 ),
               ),
+              // Right resize handle
+              _ResizeHandle(
+                isVertical: true,
+                isDragging: _isDraggingRight,
+                onDragStart: () => setState(() => _isDraggingRight = true),
+                onDragEnd: () => setState(() => _isDraggingRight = false),
+                onDragUpdate: (dx) {
+                  final newWidth = (rightWidth - dx).clamp(200.0, 500.0);
+                  ref.read(rightPanelWidthProvider.notifier).state = newWidth;
+                },
+              ),
               // Right panel - History OR Metadata (like SwarmUI)
               SizedBox(
-                width: 300,
+                width: rightWidth,
                 child: _RightPanel(),
               ),
             ],
           ),
         ),
+        // Bottom resize handle
+        _ResizeHandle(
+          isVertical: false,
+          isDragging: _isDraggingBottom,
+          onDragStart: () => setState(() => _isDraggingBottom = true),
+          onDragEnd: () => setState(() => _isDraggingBottom = false),
+          onDragUpdate: (dy) {
+            final newHeight = (bottomHeight - dy).clamp(100.0, 400.0);
+            ref.read(bottomPanelHeightProvider.notifier).state = newHeight;
+          },
+        ),
         // Bottom panel - ONLY tabs (no prompt area)
-        EriBottomPanel(),
+        SizedBox(
+          height: bottomHeight,
+          child: EriBottomPanel(),
+        ),
       ],
     );
   }
@@ -399,6 +448,55 @@ class _HistoryPanel extends ConsumerWidget {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Resize handle for draggable panel borders
+class _ResizeHandle extends StatelessWidget {
+  final bool isVertical;
+  final bool isDragging;
+  final VoidCallback onDragStart;
+  final VoidCallback onDragEnd;
+  final Function(double) onDragUpdate;
+
+  const _ResizeHandle({
+    required this.isVertical,
+    required this.isDragging,
+    required this.onDragStart,
+    required this.onDragEnd,
+    required this.onDragUpdate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return MouseRegion(
+      cursor: isVertical ? SystemMouseCursors.resizeColumn : SystemMouseCursors.resizeRow,
+      child: GestureDetector(
+        onHorizontalDragStart: isVertical ? (_) => onDragStart() : null,
+        onHorizontalDragUpdate: isVertical ? (d) => onDragUpdate(d.delta.dx) : null,
+        onHorizontalDragEnd: isVertical ? (_) => onDragEnd() : null,
+        onVerticalDragStart: !isVertical ? (_) => onDragStart() : null,
+        onVerticalDragUpdate: !isVertical ? (d) => onDragUpdate(d.delta.dy) : null,
+        onVerticalDragEnd: !isVertical ? (_) => onDragEnd() : null,
+        child: Container(
+          width: isVertical ? 6 : double.infinity,
+          height: isVertical ? double.infinity : 6,
+          color: isDragging ? colorScheme.primary.withOpacity(0.3) : Colors.transparent,
+          child: Center(
+            child: Container(
+              width: isVertical ? 2 : 40,
+              height: isVertical ? 40 : 2,
+              decoration: BoxDecoration(
+                color: isDragging ? colorScheme.primary : colorScheme.outlineVariant.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(1),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

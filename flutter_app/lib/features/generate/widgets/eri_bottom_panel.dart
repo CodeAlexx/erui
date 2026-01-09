@@ -14,6 +14,16 @@ import '../../../widgets/image_preview.dart' show isVideoUrl;
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+// Feature imports
+import 'presets_panel.dart';
+import '../../tools/grid_generator_screen.dart';
+import '../../tools/model_comparison_screen.dart';
+import '../../tools/batch_processing_screen.dart';
+import '../../tools/image_interrogator_screen.dart';
+import '../../tools/model_merger_screen.dart';
+import '../../tools/analytics_screen.dart';
+import '../../wildcards/wildcards_screen.dart';
+
 /// Bottom tab selection
 enum BottomTab { history, presets, models, loras, vaes, embeddings, controlnets, wildcards, tools }
 
@@ -215,19 +225,22 @@ class _TabContent extends ConsumerWidget {
     switch (selectedTab) {
       case BottomTab.history:
         return _HistoryTab();
+      case BottomTab.presets:
+        return const PresetsPanel();
       case BottomTab.models:
         return _ModelsGridTab();
       case BottomTab.loras:
         return _LorasGridTab();
       case BottomTab.vaes:
         return _VAEsTab();
-      default:
-        return Center(
-          child: Text(
-            '${selectedTab.name} coming soon',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
-          ),
-        );
+      case BottomTab.embeddings:
+        return _EmbeddingsTab();
+      case BottomTab.controlnets:
+        return _ControlNetsTab();
+      case BottomTab.wildcards:
+        return const WildcardsScreen();
+      case BottomTab.tools:
+        return _ToolsTab();
     }
   }
 }
@@ -668,14 +681,47 @@ class _HistoryEntry {
 }
 
 /// Models grid tab content like ERI
-class _ModelsGridTab extends ConsumerWidget {
+class _ModelsGridTab extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ModelsGridTab> createState() => _ModelsGridTabState();
+}
+
+class _ModelsGridTabState extends ConsumerState<_ModelsGridTab> {
+  final _filterController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize controller with current filter value
+    _filterController.text = ref.read(modelFilterProvider);
+  }
+
+  @override
+  void dispose() {
+    _filterController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final modelsState = ref.watch(modelsProvider);
     final params = ref.watch(generationParamsProvider);
+    final filterText = ref.watch(modelFilterProvider);
+
     // Combine checkpoints AND diffusion models (Flux, Wan, LTX, etc.)
-    final models = [...modelsState.checkpoints, ...modelsState.diffusionModels];
+    final allModels = [...modelsState.checkpoints, ...modelsState.diffusionModels];
+
+    // Filter models based on filter text
+    final models = filterText.isEmpty
+        ? allModels
+        : allModels.where((model) {
+            final searchLower = filterText.toLowerCase();
+            return model.name.toLowerCase().contains(searchLower) ||
+                model.displayName.toLowerCase().contains(searchLower) ||
+                (model.title?.toLowerCase().contains(searchLower) ?? false) ||
+                (model.modelClass?.toLowerCase().contains(searchLower) ?? false);
+          }).toList();
 
     return Column(
       children: [
@@ -692,16 +738,31 @@ class _ModelsGridTab extends ConsumerWidget {
               SizedBox(
                 width: 200,
                 child: TextField(
+                  controller: _filterController,
                   decoration: InputDecoration(
                     hintText: 'Filter...',
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                    suffixIcon: _filterController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () {
+                              _filterController.clear();
+                              ref.read(modelFilterProvider.notifier).state = '';
+                            },
+                          )
+                        : null,
                   ),
                   style: const TextStyle(fontSize: 12),
+                  onChanged: (value) {
+                    ref.read(modelFilterProvider.notifier).state = value;
+                  },
                 ),
               ),
               const Spacer(),
+              Text('${models.length} models', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+              const SizedBox(width: 12),
               Text('Sort: ', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
               DropdownButton<String>(
                 value: 'Name',
@@ -908,17 +969,30 @@ class _ViewModeButton extends StatelessWidget {
 }
 
 /// LoRAs grid tab content
-class _LorasGridTab extends ConsumerWidget {
+class _LorasGridTab extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LorasGridTab> createState() => _LorasGridTabState();
+}
+
+class _LorasGridTabState extends ConsumerState<_LorasGridTab> {
+  final _filterController = TextEditingController();
+
+  @override
+  void dispose() {
+    _filterController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final lorasAsync = ref.watch(loraListProvider);
+    final lorasAsync = ref.watch(filteredLoraListProvider);
     final selectedLoras = ref.watch(selectedLorasProvider);
     final loras = lorasAsync.valueOrNull ?? [];
 
     return Column(
       children: [
-        // Toolbar
+        // Toolbar with filter and refresh
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
@@ -926,22 +1000,42 @@ class _LorasGridTab extends ConsumerWidget {
               SizedBox(
                 width: 200,
                 child: TextField(
+                  controller: _filterController,
                   decoration: InputDecoration(
                     hintText: 'Filter...',
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                    suffixIcon: _filterController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () {
+                              _filterController.clear();
+                              ref.read(loraFilterProvider.notifier).state = '';
+                            },
+                          )
+                        : null,
                   ),
                   style: const TextStyle(fontSize: 12),
+                  onChanged: (value) {
+                    ref.read(loraFilterProvider.notifier).state = value;
+                  },
                 ),
               ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 18),
+                tooltip: 'Refresh LoRAs',
+                onPressed: () => ref.invalidate(loraListProvider),
+              ),
               const Spacer(),
-              Text('${selectedLoras.length} selected', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+              Text('${loras.length} LoRAs, ${selectedLoras.length} selected',
+                  style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
         Divider(height: 1, color: colorScheme.outlineVariant.withOpacity(0.3)),
-        // LoRA grid - horizontal cards like ERI
+        // LoRA grid
         Expanded(
           child: GridView.builder(
             padding: const EdgeInsets.all(8),
@@ -1117,12 +1211,43 @@ class _LoraCard extends ConsumerWidget {
 }
 
 /// VAEs tab content
-class _VAEsTab extends ConsumerWidget {
+class _VAEsTab extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_VAEsTab> createState() => _VAEsTabState();
+}
+
+class _VAEsTabState extends ConsumerState<_VAEsTab> {
+  final _filterController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize controller with current filter value
+    _filterController.text = ref.read(vaeFilterProvider);
+  }
+
+  @override
+  void dispose() {
+    _filterController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final modelsState = ref.watch(modelsProvider);
-    final vaes = modelsState.vaes;
+    final filterText = ref.watch(vaeFilterProvider);
+    final allVaes = modelsState.vaes;
+
+    // Filter VAEs based on filter text
+    final vaes = filterText.isEmpty
+        ? allVaes
+        : allVaes.where((vae) {
+            final searchLower = filterText.toLowerCase();
+            return vae.name.toLowerCase().contains(searchLower) ||
+                vae.displayName.toLowerCase().contains(searchLower) ||
+                (vae.title?.toLowerCase().contains(searchLower) ?? false);
+          }).toList();
 
     return Column(
       children: [
@@ -1133,15 +1258,30 @@ class _VAEsTab extends ConsumerWidget {
               SizedBox(
                 width: 200,
                 child: TextField(
+                  controller: _filterController,
                   decoration: InputDecoration(
                     hintText: 'Filter...',
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                    suffixIcon: _filterController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 16),
+                            onPressed: () {
+                              _filterController.clear();
+                              ref.read(vaeFilterProvider.notifier).state = '';
+                            },
+                          )
+                        : null,
                   ),
                   style: const TextStyle(fontSize: 12),
+                  onChanged: (value) {
+                    ref.read(vaeFilterProvider.notifier).state = value;
+                  },
                 ),
               ),
+              const Spacer(),
+              Text('${vaes.length} VAEs', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
             ],
           ),
         ),
@@ -1309,6 +1449,361 @@ class _LoraChipState extends ConsumerState<_LoraChip> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Embeddings tab content
+class _EmbeddingsTab extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final modelsState = ref.watch(modelsProvider);
+    final embeddings = modelsState.embeddings;
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 200,
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Filter embeddings...',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              const Spacer(),
+              Text('${embeddings.length} embeddings', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colorScheme.outlineVariant.withOpacity(0.3)),
+        Expanded(
+          child: embeddings.isEmpty
+              ? Center(child: Text('No embeddings found', style: TextStyle(color: colorScheme.onSurfaceVariant)))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    childAspectRatio: 2.5,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                  itemCount: embeddings.length,
+                  itemBuilder: (context, index) {
+                    final embedding = embeddings[index];
+                    return Card(
+                      color: colorScheme.surfaceContainerHighest,
+                      child: InkWell(
+                        onTap: () {
+                          // Copy embedding trigger to clipboard
+                          final trigger = embedding.name.replaceAll('.safetensors', '').replaceAll('.pt', '');
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Copied: <$trigger>'), duration: const Duration(seconds: 1)),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Row(
+                            children: [
+                              Icon(Icons.text_fields, color: colorScheme.primary, size: 20),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  embedding.displayName,
+                                  style: const TextStyle(fontSize: 11),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// ControlNets tab content
+class _ControlNetsTab extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final modelsState = ref.watch(modelsProvider);
+    final controlnets = modelsState.controlnets;
+    final params = ref.watch(generationParamsProvider);
+    final apiService = ref.watch(apiServiceProvider);
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 200,
+                child: TextField(
+                  decoration: InputDecoration(
+                    hintText: 'Filter ControlNets...',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+                  ),
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+              const Spacer(),
+              Text('${controlnets.length} models', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: colorScheme.outlineVariant.withOpacity(0.3)),
+        Expanded(
+          child: controlnets.isEmpty
+              ? Center(child: Text('No ControlNets found', style: TextStyle(color: colorScheme.onSurfaceVariant)))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    childAspectRatio: 2.5,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                  ),
+                  itemCount: controlnets.length,
+                  itemBuilder: (context, index) {
+                    final cn = controlnets[index];
+                    final isSelected = params.controlNetModel == cn.name;
+                    String? previewUrl;
+                    if (cn.previewImage != null) {
+                      previewUrl = '${apiService.baseUrl}${cn.previewImage}';
+                    }
+
+                    return Card(
+                      color: isSelected ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () {
+                          ref.read(generationParamsProvider.notifier).setControlNetModel(
+                            isSelected ? null : cn.name,
+                          );
+                        },
+                        child: Row(
+                          children: [
+                            AspectRatio(
+                              aspectRatio: 1,
+                              child: previewUrl != null
+                                  ? Image.network(previewUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) =>
+                                      Icon(Icons.control_camera, color: colorScheme.primary))
+                                  : Container(
+                                      color: colorScheme.surface,
+                                      child: Icon(Icons.control_camera, color: colorScheme.primary),
+                                    ),
+                            ),
+                            Expanded(
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      cn.displayName,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                        color: isSelected ? colorScheme.onPrimaryContainer : colorScheme.onSurface,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    if (cn.modelClass != null)
+                                      Text(
+                                        cn.modelClass!,
+                                        style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (isSelected)
+                              Padding(
+                                padding: const EdgeInsets.all(4),
+                                child: Icon(Icons.check_circle, color: colorScheme.primary, size: 18),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tools tab content - Grid Generator, Model Comparison, etc.
+class _ToolsTab extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return GridView.count(
+      padding: const EdgeInsets.all(16),
+      crossAxisCount: 3,
+      mainAxisSpacing: 12,
+      crossAxisSpacing: 12,
+      childAspectRatio: 1.5,
+      children: [
+        _ToolCard(
+          icon: Icons.grid_view,
+          title: 'XY Grid Generator',
+          description: 'Generate parameter comparison grids',
+          color: Colors.blue,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const GridGeneratorScreen(),
+            ));
+          },
+        ),
+        _ToolCard(
+          icon: Icons.compare,
+          title: 'Model Comparison',
+          description: 'Compare outputs between models',
+          color: Colors.orange,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const ModelComparisonScreen(),
+            ));
+          },
+        ),
+        _ToolCard(
+          icon: Icons.batch_prediction,
+          title: 'Batch Processing',
+          description: 'Process multiple prompts/images',
+          color: Colors.green,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const BatchProcessingScreen(),
+            ));
+          },
+        ),
+        _ToolCard(
+          icon: Icons.image_search,
+          title: 'Image Interrogator',
+          description: 'Generate prompts from images',
+          color: Colors.purple,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const ImageInterrogatorScreen(),
+            ));
+          },
+        ),
+        _ToolCard(
+          icon: Icons.merge_type,
+          title: 'Model Merger',
+          description: 'Merge checkpoint models',
+          color: Colors.red,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const ModelMergerScreen(),
+            ));
+          },
+        ),
+        _ToolCard(
+          icon: Icons.analytics,
+          title: 'Usage Analytics',
+          description: 'View generation statistics',
+          color: Colors.teal,
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const AnalyticsScreen(),
+            ));
+          },
+        ),
+      ],
+    );
+  }
+}
+
+/// Tool card widget
+class _ToolCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ToolCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, color: color, size: 24),
+                  ),
+                  const Spacer(),
+                  Icon(Icons.arrow_forward_ios, size: 14, color: colorScheme.outline),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
       ),
     );

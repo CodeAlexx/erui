@@ -13,8 +13,8 @@ final apiServiceProvider = Provider<ApiService>((ref) {
 class ApiService {
   late Dio _dio;
   WebSocketChannel? _wsChannel;
-  String _baseUrl = 'http://localhost:7803';  // EriUI backend
-  String _wsUrl = 'ws://localhost:7803/ws';  // EriUI WebSocket
+  String _baseUrl = 'http://localhost:7802';  // EriUI backend
+  String _wsUrl = 'ws://localhost:7802/ws';  // EriUI WebSocket
 
   final _connectionStateController = StreamController<ApiConnectionState>.broadcast();
   Stream<ApiConnectionState> get connectionState => _connectionStateController.stream;

@@ -9,6 +9,7 @@ import 'features/gallery/gallery_screen.dart';
 import 'features/settings/settings_screen.dart';
 import 'features/comfy_workflow/comfy_workflow_screen.dart';
 import 'features/comfyui_editor/comfyui_editor_screen.dart';
+import 'features/editor/editor_screen.dart';
 import 'features/trainer/onetrainer_shell.dart';
 import 'widgets/app_shell.dart';
 import 'providers/theme_provider.dart';
@@ -88,6 +89,13 @@ final _router = GoRouter(
           name: 'comfyui',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: ComfyUIEditorScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/editor',
+          name: 'editor',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: EditorScreen(),
           ),
         ),
         GoRoute(
