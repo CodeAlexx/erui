@@ -1,5 +1,9 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../providers/providers.dart';
 import '../../regional/regional_prompt_editor.dart';
@@ -546,7 +550,7 @@ class _ComfyUIContent extends ConsumerWidget {
           OutlinedButton.icon(
             onPressed: () {
               // Navigate to ComfyUI workflow screen
-              Navigator.of(context).pushNamed('/comfy-workflow');
+              context.go('/comfyui');
             },
             icon: const Icon(Icons.account_tree, size: 16),
             label: const Text('Open Workflow Editor'),
@@ -585,39 +589,39 @@ class _DynamicThresholdingContent extends ConsumerWidget {
           // Mimic Scale
           _ParameterSlider(
             label: 'Mimic Scale',
-            value: (params.extraParams['dt_mimic_scale'] as double?) ?? 7.0,
+            value: (params.extraParams['dtmimicscale'] as double?) ?? 7.0,
             min: 1.0,
             max: 30.0,
             divisions: 58,
             decimals: 1,
-            onChanged: (v) => paramsNotifier.setExtraParam('dt_mimic_scale', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('dtmimicscale', v),
           ),
           const SizedBox(height: 8),
           // Threshold Percentile
           _ParameterSlider(
             label: 'Threshold Percentile',
-            value: (params.extraParams['dt_threshold_percentile'] as double?) ?? 1.0,
+            value: (params.extraParams['dtthresholdpercentile'] as double?) ?? 1.0,
             min: 0.9,
             max: 1.0,
             divisions: 10,
             decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('dt_threshold_percentile', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('dtthresholdpercentile', v),
           ),
           const SizedBox(height: 8),
           // Mimic Mode
           _ParameterDropdown(
             label: 'Mimic Mode',
-            value: (params.extraParams['dt_mimic_mode'] as String?) ?? 'Constant',
+            value: (params.extraParams['dtmimicscalemode'] as String?) ?? 'Constant',
             items: const ['Constant', 'Linear Down', 'Cosine Down', 'Half Cosine Down'],
-            onChanged: (v) => paramsNotifier.setExtraParam('dt_mimic_mode', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('dtmimicscalemode', v),
           ),
           const SizedBox(height: 8),
           // CFG Mode
           _ParameterDropdown(
             label: 'CFG Mode',
-            value: (params.extraParams['dt_cfg_mode'] as String?) ?? 'Constant',
+            value: (params.extraParams['dtcfgscalemode'] as String?) ?? 'Constant',
             items: const ['Constant', 'Linear Down', 'Cosine Down', 'Half Cosine Down'],
-            onChanged: (v) => paramsNotifier.setExtraParam('dt_cfg_mode', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('dtcfgscalemode', v),
           ),
         ],
       ),
@@ -640,45 +644,45 @@ class _FreeUContent extends ConsumerWidget {
           // Backbone Scale 1
           _ParameterSlider(
             label: 'Backbone Scale 1',
-            value: (params.extraParams['freeu_b1'] as double?) ?? 1.1,
+            value: (params.extraParams['freeub1'] as double?) ?? 1.1,
             min: 0.0,
             max: 2.0,
             divisions: 40,
             decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('freeu_b1', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('freeub1', v),
           ),
           const SizedBox(height: 8),
           // Backbone Scale 2
           _ParameterSlider(
             label: 'Backbone Scale 2',
-            value: (params.extraParams['freeu_b2'] as double?) ?? 1.2,
+            value: (params.extraParams['freeub2'] as double?) ?? 1.2,
             min: 0.0,
             max: 2.0,
             divisions: 40,
             decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('freeu_b2', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('freeub2', v),
           ),
           const SizedBox(height: 8),
           // Skip Scale 1
           _ParameterSlider(
             label: 'Skip Scale 1',
-            value: (params.extraParams['freeu_s1'] as double?) ?? 0.9,
+            value: (params.extraParams['freeus1'] as double?) ?? 0.9,
             min: 0.0,
             max: 2.0,
             divisions: 40,
             decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('freeu_s1', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('freeus1', v),
           ),
           const SizedBox(height: 8),
           // Skip Scale 2
           _ParameterSlider(
             label: 'Skip Scale 2',
-            value: (params.extraParams['freeu_s2'] as double?) ?? 0.2,
+            value: (params.extraParams['freeus2'] as double?) ?? 0.2,
             min: 0.0,
             max: 2.0,
             divisions: 40,
             decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('freeu_s2', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('freeus2', v),
           ),
         ],
       ),
@@ -749,49 +753,30 @@ class _AdvancedSamplingContent extends ConsumerWidget {
           // Sigma Min
           _ParameterSlider(
             label: 'Sigma Min',
-            value: (params.extraParams['sigma_min'] as double?) ?? 0.0,
+            value: (params.extraParams['sigmamin'] as double?) ?? 0.0,
             min: 0.0,
             max: 1.0,
             divisions: 100,
             decimals: 3,
-            onChanged: (v) => paramsNotifier.setExtraParam('sigma_min', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('sigmamin', v),
           ),
           const SizedBox(height: 8),
           // Sigma Max
           _ParameterSlider(
             label: 'Sigma Max',
-            value: (params.extraParams['sigma_max'] as double?) ?? 14.6,
+            value: (params.extraParams['sigmamax'] as double?) ?? 14.6,
             min: 0.0,
             max: 20.0,
             divisions: 200,
             decimals: 1,
-            onChanged: (v) => paramsNotifier.setExtraParam('sigma_max', v),
-          ),
-          const SizedBox(height: 8),
-          // Noise Offset
-          _ParameterSlider(
-            label: 'Noise Offset',
-            value: (params.extraParams['noise_offset'] as double?) ?? 0.0,
-            min: 0.0,
-            max: 1.0,
-            divisions: 100,
-            decimals: 2,
-            onChanged: (v) => paramsNotifier.setExtraParam('noise_offset', v),
+            onChanged: (v) => paramsNotifier.setExtraParam('sigmamax', v),
           ),
           const SizedBox(height: 8),
           // VAE Tiling
           SwitchListTile(
             title: const Text('VAE Tiling', style: TextStyle(fontSize: 12)),
-            value: params.extraParams['vae_tiling'] == true,
-            onChanged: (v) => paramsNotifier.setExtraParam('vae_tiling', v),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-          ),
-          // VAE Slicing
-          SwitchListTile(
-            title: const Text('VAE Slicing', style: TextStyle(fontSize: 12)),
-            value: params.extraParams['vae_slicing'] == true,
-            onChanged: (v) => paramsNotifier.setExtraParam('vae_slicing', v),
+            value: params.extraParams['vaetile'] == true,
+            onChanged: (v) => paramsNotifier.setExtraParam('vaetile', v),
             dense: true,
             contentPadding: EdgeInsets.zero,
           ),
@@ -1110,18 +1095,22 @@ class _SamplingContent extends ConsumerWidget {
 }
 
 /// Eri Internal content (advanced settings)
-class _EriInternalContent extends StatelessWidget {
+class _EriInternalContent extends ConsumerWidget {
   final int batchSize;
   final ValueChanged<int>? onBatchSizeChanged;
 
   const _EriInternalContent({required this.batchSize, this.onBatchSizeChanged});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
 
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Batch Size
         _ParameterSlider(
           label: 'Batch Size',
           value: batchSize.toDouble(),
@@ -1130,10 +1119,64 @@ class _EriInternalContent extends StatelessWidget {
           divisions: 8,
           onChanged: onBatchSizeChanged != null ? (v) => onBatchSizeChanged!(v.round()) : null,
         ),
+        const SizedBox(height: 12),
+
+        // Backend Preference dropdown
+        _ParameterDropdown(
+          label: 'Backend Preference',
+          value: (params.extraParams['backendpreference'] as String?) ?? 'Any',
+          items: const ['Any', 'ComfyUI', 'Auto1111', 'Local'],
+          onChanged: (v) => paramsNotifier.setExtraParam('backendpreference', v),
+        ),
         const SizedBox(height: 8),
-        Text(
-          'More options coming soon...',
-          style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant, fontStyle: FontStyle.italic),
+
+        // Model Loading Behavior dropdown
+        _ParameterDropdown(
+          label: 'Model Loading',
+          value: (params.extraParams['modelloadmode'] as String?) ?? 'Standard',
+          items: const ['Standard', 'Fast Swap', 'Keep Loaded', 'Unload After'],
+          onChanged: (v) => paramsNotifier.setExtraParam('modelloadmode', v),
+        ),
+        const SizedBox(height: 8),
+
+        // Cache Settings dropdown
+        _ParameterDropdown(
+          label: 'Cache Behavior',
+          value: (params.extraParams['cachebehavior'] as String?) ?? 'Normal',
+          items: const ['Normal', 'Aggressive', 'Minimal', 'Disabled'],
+          onChanged: (v) => paramsNotifier.setExtraParam('cachebehavior', v),
+        ),
+        const SizedBox(height: 8),
+
+        // Clip Skip
+        _ParameterSlider(
+          label: 'CLIP Skip',
+          value: ((params.extraParams['clipstop'] as int?) ?? 1).toDouble(),
+          min: 1,
+          max: 12,
+          divisions: 11,
+          onChanged: (v) => paramsNotifier.setExtraParam('clipstop', v.round()),
+        ),
+        const SizedBox(height: 8),
+
+        // FreeU Auto-apply toggle
+        SwitchListTile(
+          title: Text('Auto FreeU', style: TextStyle(fontSize: 12, color: colorScheme.onSurface)),
+          subtitle: Text('Automatically apply FreeU enhancement', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+          value: params.extraParams['autoapplyfreeu'] == true,
+          onChanged: (v) => paramsNotifier.setExtraParam('autoapplyfreeu', v),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+        ),
+
+        // Seamless Tiling toggle
+        SwitchListTile(
+          title: Text('Seamless Tiling', style: TextStyle(fontSize: 12, color: colorScheme.onSurface)),
+          subtitle: Text('Generate tileable images', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+          value: params.extraParams['seamlesstileable'] == true,
+          onChanged: (v) => paramsNotifier.setExtraParam('seamlesstileable', v),
+          dense: true,
+          contentPadding: EdgeInsets.zero,
         ),
       ],
     );
@@ -1317,6 +1360,30 @@ class _InitImageContent extends ConsumerWidget {
 
   const _InitImageContent({required this.enabled});
 
+  Future<void> _pickImage(BuildContext context, WidgetRef ref) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.bytes != null) {
+          final base64String = base64Encode(file.bytes!);
+          ref.read(generationParamsProvider.notifier).setInitImage(base64String);
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -1327,48 +1394,50 @@ class _InitImageContent extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Image drop zone / preview
-        Container(
-          height: 80,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(
-              color: hasImage ? colorScheme.primary : colorScheme.outlineVariant,
-              style: BorderStyle.solid,
+        // Image drop zone / preview with file picker
+        GestureDetector(
+          onTap: () => _pickImage(context, ref),
+          child: Container(
+            height: 80,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: hasImage ? colorScheme.primary : colorScheme.outlineVariant,
+                style: BorderStyle.solid,
+              ),
             ),
-          ),
-          child: hasImage
-              ? Stack(
-                  children: [
-                    Center(
-                      child: Text('Image set', style: TextStyle(fontSize: 11, color: colorScheme.primary)),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        icon: Icon(Icons.close, size: 16, color: colorScheme.error),
-                        onPressed: () => paramsNotifier.setInitImage(null),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        tooltip: 'Clear image',
-                      ),
-                    ),
-                  ],
-                )
-              : Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+            child: hasImage
+                ? Stack(
                     children: [
-                      Icon(Icons.add_photo_alternate, size: 24, color: colorScheme.onSurfaceVariant),
-                      const SizedBox(height: 4),
-                      Text('Drop image or click', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
-                      Text('(File picker coming soon)', style: TextStyle(fontSize: 9, color: colorScheme.onSurfaceVariant.withOpacity(0.6))),
+                      Center(
+                        child: Text('Image set', style: TextStyle(fontSize: 11, color: colorScheme.primary)),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: Icon(Icons.close, size: 16, color: colorScheme.error),
+                          onPressed: () => paramsNotifier.setInitImage(null),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Clear image',
+                        ),
+                      ),
                     ],
+                  )
+                : Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_photo_alternate, size: 24, color: colorScheme.onSurfaceVariant),
+                        const SizedBox(height: 4),
+                        Text('Click to select image', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
                   ),
-                ),
+          ),
         ),
         const SizedBox(height: 8),
         // Creativity slider (denoising strength)
@@ -1444,6 +1513,30 @@ class _ControlNetContent extends ConsumerWidget {
 
   const _ControlNetContent({required this.enabled});
 
+  Future<void> _pickImage(BuildContext context, WidgetRef ref) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+        withData: true,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.bytes != null) {
+          final base64String = base64Encode(file.bytes!);
+          ref.read(generationParamsProvider.notifier).setControlNetImage(base64String);
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -1456,44 +1549,47 @@ class _ControlNetContent extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Image drop zone / preview
-        Container(
-          height: 60,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: hasImage ? colorScheme.primary : colorScheme.outlineVariant),
-          ),
-          child: hasImage
-              ? Stack(
-                  children: [
-                    Center(
-                      child: Text('Control image set', style: TextStyle(fontSize: 10, color: colorScheme.primary)),
-                    ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        icon: Icon(Icons.close, size: 14, color: colorScheme.error),
-                        onPressed: () => paramsNotifier.setControlNetImage(null),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        tooltip: 'Clear image',
-                      ),
-                    ),
-                  ],
-                )
-              : Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+        // Image drop zone / preview with file picker
+        GestureDetector(
+          onTap: () => _pickImage(context, ref),
+          child: Container(
+            height: 60,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: hasImage ? colorScheme.primary : colorScheme.outlineVariant),
+            ),
+            child: hasImage
+                ? Stack(
                     children: [
-                      Icon(Icons.add_photo_alternate, size: 20, color: colorScheme.onSurfaceVariant),
-                      const SizedBox(width: 8),
-                      Text('Drop control image', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+                      Center(
+                        child: Text('Control image set', style: TextStyle(fontSize: 10, color: colorScheme.primary)),
+                      ),
+                      Positioned(
+                        top: 4,
+                        right: 4,
+                        child: IconButton(
+                          icon: Icon(Icons.close, size: 14, color: colorScheme.error),
+                          onPressed: () => paramsNotifier.setControlNetImage(null),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Clear image',
+                        ),
+                      ),
                     ],
+                  )
+                : Center(
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add_photo_alternate, size: 20, color: colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text('Click to select control image', style: TextStyle(fontSize: 10, color: colorScheme.onSurfaceVariant)),
+                      ],
+                    ),
                   ),
-                ),
+          ),
         ),
         const SizedBox(height: 8),
         // ControlNet model dropdown
@@ -1818,38 +1914,41 @@ class _AdvancedVideoContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // FPS
+        // FPS - wired to params.fps
         _ParameterSlider(
           label: 'FPS',
-          value: 24,
+          value: params.fps.toDouble(),
           min: 1,
           max: 60,
           divisions: 59,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setFps(v.round()),
         ),
         const SizedBox(height: 8),
-        // Motion Bucket (SVD)
+        // Motion Bucket (SVD) - wired to extraParams svdmotionbucketid
         _ParameterSlider(
           label: 'Motion',
-          value: 127,
+          value: ((params.extraParams['svdmotionbucketid'] as int?) ?? 127).toDouble(),
           min: 1,
           max: 255,
           divisions: 254,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setExtraParam('svdmotionbucketid', v.round()),
         ),
         const SizedBox(height: 8),
-        // Min CFG
+        // Min CFG - wired to extraParams svdmincfg
         _ParameterSlider(
           label: 'Min CFG',
-          value: 1.0,
+          value: (params.extraParams['svdmincfg'] as double?) ?? 1.0,
           min: 0,
           max: 10,
           divisions: 20,
           decimals: 1,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setExtraParam('svdmincfg', v),
         ),
       ],
     );
@@ -1864,25 +1963,28 @@ class _VideoExtendContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final params = ref.watch(generationParamsProvider);
+    final paramsNotifier = ref.read(generationParamsProvider.notifier);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Frame Overlap
+        // Frame Overlap - wired to extraParams videoframeoverlap
         _ParameterSlider(
           label: 'Overlap',
-          value: 9,
+          value: ((params.extraParams['videoframeoverlap'] as int?) ?? 9).toDouble(),
           min: 1,
           max: 32,
           divisions: 31,
-          onChanged: (v) {},
+          onChanged: (v) => paramsNotifier.setExtraParam('videoframeoverlap', v.round()),
         ),
         const SizedBox(height: 8),
-        // Extend format
+        // Extend format - wired to extraParams videoextendformat
         _ParameterDropdown(
           label: 'Format',
-          value: 'webp',
-          items: ['webp', 'gif', 'mp4', 'webm'],
-          onChanged: (v) {},
+          value: (params.extraParams['videoextendformat'] as String?) ?? 'webp',
+          items: const ['webp', 'gif', 'mp4', 'webm'],
+          onChanged: (v) => paramsNotifier.setExtraParam('videoextendformat', v),
         ),
       ],
     );
