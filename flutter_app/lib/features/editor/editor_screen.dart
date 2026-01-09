@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'models/editor_models.dart';
 import 'providers/editor_provider.dart';
 import 'providers/undo_system.dart';
+import 'services/playback_controller.dart';
 import 'widgets/timeline_widget.dart';
 import 'widgets/track_header.dart';
 import 'widgets/time_ruler.dart';
@@ -243,10 +244,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
             icon: playbackState == PlaybackState.playing ? Icons.pause : Icons.play_arrow,
             tooltip: playbackState == PlaybackState.playing ? 'Pause (Space)' : 'Play (Space)',
             onPressed: () {
+              final playbackController = ref.read(playbackControllerProvider);
               if (playbackState == PlaybackState.playing) {
-                ref.read(editorProjectProvider.notifier).pause();
+                playbackController.pause();
               } else {
-                ref.read(editorProjectProvider.notifier).play();
+                playbackController.play();
               }
             },
             highlighted: playbackState == PlaybackState.playing,
@@ -254,7 +256,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
           _ToolbarButton(
             icon: Icons.stop,
             tooltip: 'Stop',
-            onPressed: () => ref.read(editorProjectProvider.notifier).stop(),
+            onPressed: () => ref.read(playbackControllerProvider).stop(),
           ),
           _ToolbarButton(
             icon: Icons.fast_forward,
@@ -762,11 +764,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
 
     // Space - Play/Pause
     if (event.logicalKey == LogicalKeyboardKey.space) {
+      final playbackController = ref.read(playbackControllerProvider);
       final playbackState = ref.read(playbackStateProvider);
       if (playbackState == PlaybackState.playing) {
-        ref.read(editorProjectProvider.notifier).pause();
+        playbackController.pause();
       } else {
-        ref.read(editorProjectProvider.notifier).play();
+        playbackController.play();
       }
     }
     // Ctrl+Z - Undo
