@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 
 /// ControlNet configuration
 class ControlNetConfig {
@@ -251,9 +251,9 @@ class AdvancedGenerationState {
 
 /// Advanced generation notifier
 class AdvancedGenerationNotifier extends StateNotifier<AdvancedGenerationState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  AdvancedGenerationNotifier(this._apiService) : super(const AdvancedGenerationState());
+  AdvancedGenerationNotifier(this._comfyService) : super(const AdvancedGenerationState());
 
   // ========== MODE ==========
 
@@ -444,8 +444,8 @@ class AdvancedGenerationNotifier extends StateNotifier<AdvancedGenerationState> 
 
 /// Provider for advanced generation state
 final advancedGenerationProvider = StateNotifierProvider<AdvancedGenerationNotifier, AdvancedGenerationState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return AdvancedGenerationNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return AdvancedGenerationNotifier(comfyService);
 });
 
 /// Queue item
@@ -487,6 +487,23 @@ class QueueItem {
       previewUrl: json['preview_url'] as String?,
     );
   }
+
+  /// Create from ComfyUI queue entry
+  factory QueueItem.fromComfyQueue(Map<String, dynamic> entry, {required bool isRunning}) {
+    final promptId = entry['prompt_id'] as String? ?? entry[1] as String? ?? '';
+
+    return QueueItem(
+      id: promptId,
+      type: 'generation',
+      status: isRunning ? 'running' : 'pending',
+      createdAt: DateTime.now(),
+      completedAt: null,
+      batchId: null,
+      params: entry,
+      progress: null,
+      previewUrl: null,
+    );
+  }
 }
 
 /// Queue state
@@ -524,28 +541,42 @@ class QueueState {
 
 /// Queue notifier
 class QueueNotifier extends StateNotifier<QueueState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  QueueNotifier(this._apiService) : super(const QueueState());
+  QueueNotifier(this._comfyService) : super(const QueueState());
 
   Future<void> refresh() async {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      final response = await _apiService.get('/api/GetQueueStatus');
-      if (!response.isSuccess || response.data == null) {
+      final queue = await _comfyService.getQueue();
+      if (queue == null) {
         state = state.copyWith(isLoading: false, error: 'Failed to fetch queue');
         return;
       }
-      final data = response.data as Map<String, dynamic>;
-      final items = (data['items'] as List? ?? [])
-          .map((e) => QueueItem.fromJson(e as Map<String, dynamic>))
-          .toList();
+
+      final items = <QueueItem>[];
+
+      // Parse running queue
+      final running = queue['queue_running'] as List? ?? [];
+      for (final entry in running) {
+        if (entry is List && entry.isNotEmpty) {
+          items.add(QueueItem.fromComfyQueue({'prompt_id': entry[1]}, isRunning: true));
+        }
+      }
+
+      // Parse pending queue
+      final pending = queue['queue_pending'] as List? ?? [];
+      for (final entry in pending) {
+        if (entry is List && entry.isNotEmpty) {
+          items.add(QueueItem.fromComfyQueue({'prompt_id': entry[1]}, isRunning: false));
+        }
+      }
 
       state = state.copyWith(
         items: items,
-        pending: data['pending'] as int? ?? 0,
-        running: data['running'] as int? ?? 0,
+        pending: pending.length,
+        running: running.length,
         isLoading: false,
       );
     } catch (e) {
@@ -555,7 +586,9 @@ class QueueNotifier extends StateNotifier<QueueState> {
 
   Future<bool> cancelItem(String id) async {
     try {
-      await _apiService.post('/api/CancelQueueItem', data: {'id': id});
+      // ComfyUI doesn't have individual item cancellation
+      // We can only interrupt current or clear queue
+      await _comfyService.interrupt();
       await refresh();
       return true;
     } catch (e) {
@@ -565,7 +598,7 @@ class QueueNotifier extends StateNotifier<QueueState> {
 
   Future<bool> clearQueue() async {
     try {
-      await _apiService.post('/api/ClearQueue', data: {});
+      await _comfyService.clearQueue();
       await refresh();
       return true;
     } catch (e) {
@@ -574,20 +607,16 @@ class QueueNotifier extends StateNotifier<QueueState> {
   }
 
   Future<bool> reorderQueue(List<String> order) async {
-    try {
-      await _apiService.post('/api/ReorderQueue', data: {'order': order});
-      await refresh();
-      return true;
-    } catch (e) {
-      return false;
-    }
+    // ComfyUI doesn't support queue reordering
+    // This is a no-op but kept for API compatibility
+    return false;
   }
 }
 
 /// Provider for queue state
 final queueProvider = StateNotifierProvider<QueueNotifier, QueueState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return QueueNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return QueueNotifier(comfyService);
 });
 
 /// ControlNet model info
@@ -607,6 +636,15 @@ class ControlNetModel {
       name: json['name'] as String,
       path: json['path'] as String,
       type: json['type'] as String?,
+    );
+  }
+
+  /// Create from ComfyUI model name string
+  factory ControlNetModel.fromComfyName(String name) {
+    return ControlNetModel(
+      name: name,
+      path: name,
+      type: null,
     );
   }
 }
@@ -651,40 +689,43 @@ class UpscalerModel {
       scale: json['scale'] as String,
     );
   }
+
+  /// Create from ComfyUI model name string
+  factory UpscalerModel.fromComfyName(String name) {
+    return UpscalerModel(
+      name: name,
+      path: name,
+      scale: '4x', // Default, ComfyUI doesn't expose this directly
+    );
+  }
 }
 
 /// Provider for ControlNet models
 final controlNetModelsProvider = FutureProvider<List<ControlNetModel>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  final response = await apiService.get('/api/ListControlNetModels');
-  if (!response.isSuccess || response.data == null) return [];
-  final data = response.data as Map<String, dynamic>;
-  final models = (data['models'] as List? ?? [])
-      .map((e) => ControlNetModel.fromJson(e as Map<String, dynamic>))
-      .toList();
-  return models;
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  final models = await comfyService.getControlNets();
+  return models.map((name) => ControlNetModel.fromComfyName(name)).toList();
 });
 
-/// Provider for preprocessors
+/// Provider for preprocessors (ComfyUI uses ControlNet preprocessor nodes)
 final preprocessorsProvider = FutureProvider<List<Preprocessor>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  final response = await apiService.get('/api/ListControlNetPreprocessors');
-  if (!response.isSuccess || response.data == null) return [];
-  final data = response.data as Map<String, dynamic>;
-  final preprocessors = (data['preprocessors'] as List? ?? [])
-      .map((e) => Preprocessor.fromJson(e as Map<String, dynamic>))
-      .toList();
-  return preprocessors;
+  // ComfyUI doesn't have a direct preprocessor list API
+  // Common preprocessors are available via custom nodes
+  return [
+    const Preprocessor(id: 'canny', name: 'Canny Edge', description: 'Edge detection'),
+    const Preprocessor(id: 'depth_midas', name: 'Depth (MiDaS)', description: 'Depth estimation'),
+    const Preprocessor(id: 'openpose', name: 'OpenPose', description: 'Pose detection'),
+    const Preprocessor(id: 'scribble', name: 'Scribble', description: 'Scribble/sketch detection'),
+    const Preprocessor(id: 'lineart', name: 'Line Art', description: 'Line art extraction'),
+    const Preprocessor(id: 'softedge', name: 'Soft Edge', description: 'Soft edge detection'),
+    const Preprocessor(id: 'normal', name: 'Normal Map', description: 'Normal map estimation'),
+    const Preprocessor(id: 'segmentation', name: 'Segmentation', description: 'Image segmentation'),
+  ];
 });
 
 /// Provider for upscalers
 final upscalersProvider = FutureProvider<List<UpscalerModel>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
-  final response = await apiService.get('/api/ListUpscalers');
-  if (!response.isSuccess || response.data == null) return [];
-  final data = response.data as Map<String, dynamic>;
-  final upscalers = (data['upscalers'] as List? ?? [])
-      .map((e) => UpscalerModel.fromJson(e as Map<String, dynamic>))
-      .toList();
-  return upscalers;
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  final models = await comfyService.getUpscaleModels();
+  return models.map((name) => UpscalerModel.fromComfyName(name)).toList();
 });

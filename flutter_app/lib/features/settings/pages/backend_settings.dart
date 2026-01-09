@@ -1,9 +1,169 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../providers/providers.dart';
-import '../../../services/api_service.dart';
+import '../../../services/comfyui_service.dart';
+import '../../../services/storage_service.dart';
 import '../widgets/settings_section.dart';
+
+/// ComfyUI connection state provider
+final comfyConnectionStateProvider =
+    StateNotifierProvider<ComfyConnectionNotifier, ComfyConnectionInfo>((ref) {
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return ComfyConnectionNotifier(comfyService);
+});
+
+/// Connection information for ComfyUI
+class ComfyConnectionInfo {
+  final String host;
+  final int port;
+  final ComfyConnectionState state;
+  final String? errorMessage;
+  final bool autoConnect;
+  final bool autoReconnect;
+
+  const ComfyConnectionInfo({
+    this.host = 'localhost',
+    this.port = 8188,
+    this.state = ComfyConnectionState.disconnected,
+    this.errorMessage,
+    this.autoConnect = true,
+    this.autoReconnect = true,
+  });
+
+  ComfyConnectionInfo copyWith({
+    String? host,
+    int? port,
+    ComfyConnectionState? state,
+    String? errorMessage,
+    bool? autoConnect,
+    bool? autoReconnect,
+  }) {
+    return ComfyConnectionInfo(
+      host: host ?? this.host,
+      port: port ?? this.port,
+      state: state ?? this.state,
+      errorMessage: errorMessage,
+      autoConnect: autoConnect ?? this.autoConnect,
+      autoReconnect: autoReconnect ?? this.autoReconnect,
+    );
+  }
+
+  bool get isConnected => state == ComfyConnectionState.connected;
+  bool get isConnecting => state == ComfyConnectionState.connecting;
+  bool get hasError => state == ComfyConnectionState.error;
+
+  String get statusText {
+    switch (state) {
+      case ComfyConnectionState.disconnected:
+        return 'Disconnected';
+      case ComfyConnectionState.connecting:
+        return 'Connecting...';
+      case ComfyConnectionState.connected:
+        return 'Connected';
+      case ComfyConnectionState.error:
+        return errorMessage ?? 'Error';
+    }
+  }
+}
+
+/// ComfyUI connection state notifier
+class ComfyConnectionNotifier extends StateNotifier<ComfyConnectionInfo> {
+  final ComfyUIService _comfyService;
+
+  ComfyConnectionNotifier(this._comfyService) : super(const ComfyConnectionInfo()) {
+    _loadSavedConnection();
+    _listenToConnectionState();
+  }
+
+  /// Load saved connection settings
+  Future<void> _loadSavedConnection() async {
+    final host = StorageService.getStringStatic('comfy_host') ?? 'localhost';
+    final port = StorageService.getInt('comfy_port') ?? 8188;
+    final autoConnect = StorageService.getBool('comfy_auto_connect') ?? true;
+    final autoReconnect = StorageService.getBool('comfy_auto_reconnect') ?? true;
+
+    state = state.copyWith(
+      host: host,
+      port: port,
+      autoConnect: autoConnect,
+      autoReconnect: autoReconnect,
+    );
+    _comfyService.configure(host: host, port: port);
+
+    // Auto-connect on startup if enabled
+    if (autoConnect) {
+      Future.delayed(const Duration(milliseconds: 500), () => connect());
+    }
+  }
+
+  /// Listen to connection state changes
+  void _listenToConnectionState() {
+    _comfyService.connectionState.listen((connectionState) {
+      state = state.copyWith(state: connectionState);
+    });
+  }
+
+  /// Update connection settings
+  Future<void> updateSettings({
+    String? host,
+    int? port,
+    bool? autoConnect,
+    bool? autoReconnect,
+  }) async {
+    if (host != null) {
+      state = state.copyWith(host: host);
+      await StorageService.setStringStatic('comfy_host', host);
+    }
+    if (port != null) {
+      state = state.copyWith(port: port);
+      await StorageService.setInt('comfy_port', port);
+    }
+    if (autoConnect != null) {
+      state = state.copyWith(autoConnect: autoConnect);
+      await StorageService.setBool('comfy_auto_connect', autoConnect);
+    }
+    if (autoReconnect != null) {
+      state = state.copyWith(autoReconnect: autoReconnect);
+      await StorageService.setBool('comfy_auto_reconnect', autoReconnect);
+    }
+
+    _comfyService.configure(host: state.host, port: state.port);
+  }
+
+  /// Connect to ComfyUI backend
+  Future<bool> connect() async {
+    state = state.copyWith(
+      state: ComfyConnectionState.connecting,
+      errorMessage: null,
+    );
+
+    try {
+      final success = await _comfyService.connect();
+      if (success) {
+        state = state.copyWith(state: ComfyConnectionState.connected);
+        return true;
+      } else {
+        state = state.copyWith(
+          state: ComfyConnectionState.error,
+          errorMessage: 'Failed to connect to ComfyUI',
+        );
+        return false;
+      }
+    } catch (e) {
+      state = state.copyWith(
+        state: ComfyConnectionState.error,
+        errorMessage: e.toString(),
+      );
+      return false;
+    }
+  }
+
+  /// Disconnect from ComfyUI backend
+  Future<void> disconnect() async {
+    await _comfyService.disconnect();
+    state = state.copyWith(state: ComfyConnectionState.disconnected);
+  }
+}
 
 /// Backend settings page
 class BackendSettingsPage extends ConsumerStatefulWidget {
@@ -33,7 +193,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
-    final connectionInfo = ref.watch(connectionStateProvider);
+    final connectionInfo = ref.watch(comfyConnectionStateProvider);
     final colorScheme = Theme.of(context).colorScheme;
 
     // Initialize controllers from state
@@ -46,12 +206,12 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
       padding: const EdgeInsets.all(24),
       children: [
         Text(
-          'Backend',
+          'ComfyUI Backend',
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const SizedBox(height: 8),
         Text(
-          'Configure backend server connection',
+          'Configure ComfyUI server connection',
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colorScheme.outline,
               ),
@@ -106,7 +266,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
         const SizedBox(height: 24),
         // Server configuration
         SettingsSection(
-          title: 'Server Configuration',
+          title: 'ComfyUI Server',
           children: [
             Padding(
               padding: const EdgeInsets.all(16),
@@ -122,6 +282,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                           decoration: const InputDecoration(
                             labelText: 'Host',
                             hintText: 'localhost',
+                            helperText: 'ComfyUI server hostname or IP',
                           ),
                         ),
                       ),
@@ -131,7 +292,8 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                           controller: _portController,
                           decoration: const InputDecoration(
                             labelText: 'Port',
-                            hintText: '7802',
+                            hintText: '8188',
+                            helperText: 'Default: 8188',
                           ),
                           keyboardType: TextInputType.number,
                         ),
@@ -144,7 +306,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                       if (connectionInfo.isConnected)
                         OutlinedButton.icon(
                           onPressed: () async {
-                            await ref.read(connectionStateProvider.notifier).disconnect();
+                            await ref.read(comfyConnectionStateProvider.notifier).disconnect();
                           },
                           icon: const Icon(Icons.power_off),
                           label: const Text('Disconnect'),
@@ -154,12 +316,12 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                           onPressed: connectionInfo.isConnecting
                               ? null
                               : () async {
-                                  final port = int.tryParse(_portController.text) ?? 7802;
-                                  await ref.read(connectionStateProvider.notifier).updateSettings(
+                                  final port = int.tryParse(_portController.text) ?? 8188;
+                                  await ref.read(comfyConnectionStateProvider.notifier).updateSettings(
                                         host: _hostController.text,
                                         port: port,
                                       );
-                                  await ref.read(connectionStateProvider.notifier).connect();
+                                  await ref.read(comfyConnectionStateProvider.notifier).connect();
                                 },
                           icon: connectionInfo.isConnecting
                               ? const SizedBox(
@@ -172,8 +334,18 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                         ),
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
-                        onPressed: () {
-                          // TODO: Test connection
+                        onPressed: () async {
+                          final comfyService = ref.read(comfyUIServiceProvider);
+                          final stats = await comfyService.getSystemStats();
+                          if (stats != null && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('ComfyUI is responding. System stats received.')),
+                            );
+                          } else if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Failed to get ComfyUI stats')),
+                            );
+                          }
                         },
                         icon: const Icon(Icons.speed),
                         label: const Text('Test'),
@@ -186,50 +358,58 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
           ],
         ),
         const SizedBox(height: 24),
-        // Backend type
-        SettingsSection(
-          title: 'Backend Type',
-          children: [
-            RadioListTile<String>(
-              title: const Text('ComfyUI'),
-              subtitle: const Text('Node-based workflow backend (recommended)'),
-              value: 'comfyui',
-              groupValue: 'comfyui',
-              onChanged: (value) {
-                // TODO: Implement
-              },
-            ),
-            RadioListTile<String>(
-              title: const Text('Auto1111'),
-              subtitle: const Text('Automatic1111 Stable Diffusion WebUI'),
-              value: 'auto1111',
-              groupValue: 'comfyui',
-              onChanged: (value) {
-                // TODO: Implement
-              },
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        // Auto-connect
+        // Connection Settings
         SettingsSection(
           title: 'Connection Settings',
           children: [
             SwitchListTile(
               title: const Text('Auto-connect on startup'),
               subtitle: const Text('Automatically connect when app starts'),
-              value: true,
-              onChanged: (value) {
-                // TODO: Implement
+              value: connectionInfo.autoConnect,
+              onChanged: (value) async {
+                await ref.read(comfyConnectionStateProvider.notifier).updateSettings(
+                  autoConnect: value,
+                );
               },
             ),
             SwitchListTile(
               title: const Text('Auto-reconnect'),
               subtitle: const Text('Automatically reconnect if connection is lost'),
-              value: true,
-              onChanged: (value) {
-                // TODO: Implement
+              value: connectionInfo.autoReconnect,
+              onChanged: (value) async {
+                await ref.read(comfyConnectionStateProvider.notifier).updateSettings(
+                  autoReconnect: value,
+                );
               },
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        // Info section
+        SettingsSection(
+          title: 'About ComfyUI',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'EriUI connects directly to ComfyUI for image generation. '
+                    'Make sure ComfyUI is running and accessible at the configured address.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: colorScheme.outline,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Default ComfyUI port: 8188',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.outline,
+                        ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -237,15 +417,15 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
     );
   }
 
-  Color _getStatusColor(ApiConnectionState state) {
+  Color _getStatusColor(ComfyConnectionState state) {
     switch (state) {
-      case ApiConnectionState.connected:
+      case ComfyConnectionState.connected:
         return Colors.green;
-      case ApiConnectionState.connecting:
+      case ComfyConnectionState.connecting:
         return Colors.orange;
-      case ApiConnectionState.error:
+      case ComfyConnectionState.error:
         return Colors.red;
-      case ApiConnectionState.disconnected:
+      case ComfyConnectionState.disconnected:
         return Colors.grey;
     }
   }

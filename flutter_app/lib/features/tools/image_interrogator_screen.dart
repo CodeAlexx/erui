@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -7,7 +8,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
 
 import '../../providers/providers.dart';
-import '../../services/api_service.dart';
+import '../../services/comfyui_service.dart';
 
 /// Image Interrogator Screen
 ///
@@ -869,9 +870,8 @@ class _ActionButton extends StatelessWidget {
 /// Interrogator state provider
 final interrogatorProvider =
     StateNotifierProvider<InterrogatorNotifier, InterrogatorState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  final session = ref.watch(sessionProvider);
-  return InterrogatorNotifier(apiService, session);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return InterrogatorNotifier(comfyService);
 });
 
 /// Single image for interrogation
@@ -952,11 +952,11 @@ class InterrogatorState {
 
 /// Interrogator state notifier
 class InterrogatorNotifier extends StateNotifier<InterrogatorState> {
-  final ApiService _apiService;
-  final SessionState _session;
+  final ComfyUIService _comfyService;
   bool _shouldCancel = false;
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
 
-  InterrogatorNotifier(this._apiService, this._session)
+  InterrogatorNotifier(this._comfyService)
       : super(const InterrogatorState());
 
   /// Add an image to interrogate
@@ -982,12 +982,14 @@ class InterrogatorNotifier extends StateNotifier<InterrogatorState> {
   /// Clear all images and results
   void clearAll() {
     _shouldCancel = true;
+    _progressSubscription?.cancel();
     state = const InterrogatorState();
   }
 
   /// Cancel interrogation
   void cancel() {
     _shouldCancel = true;
+    _progressSubscription?.cancel();
     state = state.copyWith(
       isInterrogating: false,
       isCancelled: true,
@@ -997,8 +999,8 @@ class InterrogatorNotifier extends StateNotifier<InterrogatorState> {
   /// Interrogate all images
   Future<void> interrogateAll() async {
     if (state.images.isEmpty) return;
-    if (_session.sessionId == null) {
-      state = state.copyWith(error: 'Not connected');
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      state = state.copyWith(error: 'Not connected to ComfyUI');
       return;
     }
 
@@ -1048,53 +1050,183 @@ class InterrogatorNotifier extends StateNotifier<InterrogatorState> {
     );
   }
 
-  /// Interrogate a single image
+  /// Interrogate a single image using ComfyUI CLIP Interrogator workflow
   Future<String?> _interrogateSingle(InterrogatorImage image) async {
     try {
-      // Convert image to base64
-      final base64Image = base64Encode(image.bytes);
-
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/API/Interrogate',
-        data: {
-          'session_id': _session.sessionId,
-          'image': 'data:image/png;base64,$base64Image',
-          'model': state.selectedModel,
-        },
+      // Upload image to ComfyUI
+      final uploadResult = await _comfyService.uploadImage(
+        image.bytes,
+        image.filename,
       );
 
-      if (!response.isSuccess || response.data == null) {
+      if (uploadResult == null) {
         return null;
       }
 
-      final data = response.data!;
+      // Build CLIP Interrogator workflow
+      // This workflow uses: LoadImage -> CLIPLoader -> CLIPInterrogate
+      final workflow = _buildInterrogatorWorkflow(
+        imageName: uploadResult['name'] as String,
+        model: state.selectedModel,
+      );
 
-      // Handle different response formats
-      if (data.containsKey('result')) {
-        return data['result'] as String?;
-      } else if (data.containsKey('caption')) {
-        return data['caption'] as String?;
-      } else if (data.containsKey('tags')) {
-        final tags = data['tags'];
-        if (tags is List) {
-          return tags.join(', ');
-        } else if (tags is String) {
-          return tags;
-        }
-      } else if (data.containsKey('output')) {
-        return data['output'] as String?;
+      // Queue the workflow
+      final promptId = await _comfyService.queuePrompt(workflow);
+      if (promptId == null) {
+        return null;
       }
 
-      // If none of the expected keys, try to get any string value
-      for (final value in data.values) {
-        if (value is String && value.isNotEmpty) {
-          return value;
-        }
-      }
-
-      return null;
+      // Wait for result
+      return await _waitForInterrogationResult(promptId);
     } catch (e) {
       return null;
+    }
+  }
+
+  /// Build ComfyUI workflow for image interrogation
+  Map<String, dynamic> _buildInterrogatorWorkflow({
+    required String imageName,
+    required String model,
+  }) {
+    // Map model names to ComfyUI node types
+    String nodeClass;
+    switch (model) {
+      case 'CLIP':
+        nodeClass = 'WD14Tagger|pysssss';
+        break;
+      case 'BLIP':
+      case 'BLIP2':
+        nodeClass = 'BLIPLoader';
+        break;
+      case 'WD14 ViT':
+      case 'WD14 ConvNext':
+      case 'WD14 SwinV2':
+        nodeClass = 'WD14Tagger|pysssss';
+        break;
+      case 'DeepBooru':
+        nodeClass = 'DeepBooru';
+        break;
+      default:
+        nodeClass = 'WD14Tagger|pysssss';
+    }
+
+    // Simple workflow: LoadImage -> Interrogator -> Output
+    return {
+      '1': {
+        'class_type': 'LoadImage',
+        'inputs': {
+          'image': imageName,
+        },
+      },
+      '2': {
+        'class_type': nodeClass,
+        'inputs': {
+          'image': ['1', 0],
+          'model': _getModelPath(model),
+          'threshold': 0.35,
+          'character_threshold': 0.85,
+          'replace_underscore': true,
+          'trailing_comma': false,
+          'exclude_tags': '',
+        },
+      },
+    };
+  }
+
+  /// Get model path for different interrogator types
+  String _getModelPath(String model) {
+    switch (model) {
+      case 'WD14 ViT':
+        return 'wd-v1-4-vit-tagger-v2';
+      case 'WD14 ConvNext':
+        return 'wd-v1-4-convnext-tagger-v2';
+      case 'WD14 SwinV2':
+        return 'wd-v1-4-swinv2-tagger-v2';
+      case 'DeepBooru':
+        return 'deepbooru';
+      default:
+        return 'wd-v1-4-vit-tagger-v2';
+    }
+  }
+
+  /// Wait for interrogation result from ComfyUI
+  Future<String?> _waitForInterrogationResult(String promptId) async {
+    final completer = Completer<String?>();
+
+    // Cancel any existing subscription
+    await _progressSubscription?.cancel();
+
+    // Listen to progress stream for this specific prompt
+    _progressSubscription = _comfyService.progressStream.listen((update) async {
+      if (update.promptId != promptId) return;
+
+      if (update.isComplete) {
+        // Fetch result from history API
+        try {
+          final history = await _comfyService.getHistory(promptId);
+          if (history != null) {
+            final outputs = history['outputs'] as Map<String, dynamic>?;
+            if (outputs != null) {
+              // Look for text output in the execution result
+              for (final nodeOutput in outputs.values) {
+                if (nodeOutput is Map) {
+                  // Check for tags/text output (WD14 tagger output format)
+                  if (nodeOutput.containsKey('tags')) {
+                    final tagsList = nodeOutput['tags'];
+                    if (tagsList is List && tagsList.isNotEmpty) {
+                      final tags = tagsList.first;
+                      if (tags is String && !completer.isCompleted) {
+                        completer.complete(tags);
+                        return;
+                      }
+                    }
+                  }
+                  // Check for text output (BLIP output format)
+                  if (nodeOutput.containsKey('text')) {
+                    final textList = nodeOutput['text'];
+                    if (textList is List && textList.isNotEmpty) {
+                      final text = textList.first;
+                      if (text is String && !completer.isCompleted) {
+                        completer.complete(text);
+                        return;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore fetch errors
+        }
+        // If no text output found, complete with null
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+      } else if (update.status == 'error' || update.status == 'interrupted') {
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+      }
+    });
+
+    // Also listen to error stream
+    final errorSubscription = _comfyService.errorStream.listen((error) {
+      if (error.promptId == promptId && !completer.isCompleted) {
+        completer.complete(null);
+      }
+    });
+
+    try {
+      // Wait for completion with timeout
+      final result = await completer.future.timeout(
+        const Duration(minutes: 2),
+        onTimeout: () => null,
+      );
+      return result;
+    } finally {
+      await _progressSubscription?.cancel();
+      await errorSubscription.cancel();
     }
   }
 

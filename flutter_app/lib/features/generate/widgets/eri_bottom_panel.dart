@@ -8,7 +8,7 @@ import '../../../providers/providers.dart';
 import '../../../providers/lora_provider.dart';
 import '../../../providers/models_provider.dart';
 import '../../../providers/gallery_provider.dart';
-import '../../../services/api_service.dart';
+import '../../../services/comfyui_service.dart';
 import '../../../widgets/image_viewer_dialog.dart';
 import '../../../widgets/image_preview.dart' show isVideoUrl;
 import 'package:media_kit/media_kit.dart';
@@ -264,9 +264,10 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final apiService = ref.watch(apiServiceProvider);
+    final comfyService = ref.watch(comfyUIServiceProvider);
     final galleryState = ref.watch(galleryProvider);
     final generationState = ref.watch(generationProvider);
+    final baseUrl = 'http://${comfyService.host}:${comfyService.port}';
 
     // Combine current session images with persistent history
     final currentImages = generationState.generatedImages;
@@ -279,19 +280,19 @@ class _HistoryTabState extends ConsumerState<_HistoryTab> {
         String? thumbUrl;
         if (isVideoUrl(url)) {
           // Extract path from URL and create thumbnail URL
-          // URL format: http://host:port/API/GetHistoryImage?path=...
-          // Or direct path: http://host:port/path/to/video.mp4
+          // ComfyUI uses /view?filename=... format
           final uri = Uri.parse(url);
-          final path = uri.queryParameters['path'];
-          if (path != null) {
-            thumbUrl = '${apiService.baseUrl}/API/GetVideoThumbnail?path=${Uri.encodeComponent(path)}';
+          final filename = uri.queryParameters['filename'];
+          if (filename != null) {
+            // Use first frame as thumbnail for videos
+            thumbUrl = url;
           }
         }
         return _HistoryEntry(url: url, thumbnailUrl: thumbUrl, isCurrentSession: true);
       }),
       ...historyImages.map((img) => _HistoryEntry(
-        url: '${apiService.baseUrl}${img.url}',
-        thumbnailUrl: img.thumbnailUrl != null ? '${apiService.baseUrl}${img.thumbnailUrl}' : null,
+        url: '$baseUrl${img.url}',
+        thumbnailUrl: img.thumbnailUrl != null ? '$baseUrl${img.thumbnailUrl}' : null,
         image: img,
         isCurrentSession: false,
       )),
@@ -820,12 +821,13 @@ class _ModelCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    final apiService = ref.watch(apiServiceProvider);
+    final comfyService = ref.watch(comfyUIServiceProvider);
+    final baseUrl = 'http://${comfyService.host}:${comfyService.port}';
 
     // Build full preview URL
     String? previewUrl;
     if (model.previewImage != null) {
-      previewUrl = '${apiService.baseUrl}${model.previewImage}';
+      previewUrl = '$baseUrl${model.previewImage}';
     }
 
     return Card(
@@ -1084,12 +1086,13 @@ class _LoraCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
-    final apiService = ref.watch(apiServiceProvider);
+    final comfyService = ref.watch(comfyUIServiceProvider);
+    final baseUrl = 'http://${comfyService.host}:${comfyService.port}';
 
     // Build preview URL if available
     String? previewUrl;
     if (lora.previewImage != null) {
-      previewUrl = '${apiService.baseUrl}${lora.previewImage}';
+      previewUrl = '$baseUrl${lora.previewImage}';
     }
 
     return Card(
@@ -1570,7 +1573,8 @@ class _ControlNetsTab extends ConsumerWidget {
     final modelsState = ref.watch(modelsProvider);
     final controlnets = modelsState.controlnets;
     final params = ref.watch(generationParamsProvider);
-    final apiService = ref.watch(apiServiceProvider);
+    final comfyService = ref.watch(comfyUIServiceProvider);
+    final baseUrl = 'http://${comfyService.host}:${comfyService.port}';
 
     return Column(
       children: [
@@ -1621,7 +1625,7 @@ class _ControlNetsTab extends ConsumerWidget {
                     final isSelected = params.controlNetModel == cn.name;
                     String? previewUrl;
                     if (cn.previewImage != null) {
-                      previewUrl = '${apiService.baseUrl}${cn.previewImage}';
+                      previewUrl = '$baseUrl${cn.previewImage}';
                     }
 
                     return Card(

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../services/api_service.dart';
+import '../../services/comfyui_service.dart';
 import 'widgets/workflow_card.dart';
 import 'widgets/save_workflow_dialog.dart';
 
@@ -42,14 +42,11 @@ class WorkflowInfo {
 }
 
 /// Provider for workflow list
+/// Note: Workflow management requires local storage or external workflow manager
+/// ComfyUI doesn't have a built-in workflow listing API
 final workflowListProvider = FutureProvider<List<WorkflowInfo>>((ref) async {
-  final api = ref.watch(apiServiceProvider);
-  final response = await api.getJson('/api/workflows');
-  if (response != null && response['workflows'] != null) {
-    return (response['workflows'] as List)
-        .map((w) => WorkflowInfo.fromJson(w as Map<String, dynamic>))
-        .toList();
-  }
+  // TODO: Implement workflow storage using local storage or file system
+  // For now, return empty list - workflows are loaded directly in ComfyUI
   return [];
 });
 
@@ -139,8 +136,11 @@ class _ComfyWorkflowScreenState extends ConsumerState<ComfyWorkflowScreen> {
     );
 
     if (confirmed == true) {
-      final api = ref.read(apiServiceProvider);
-      await api.deleteJson('/api/workflows/${workflow.filename}');
+      // TODO: Implement local workflow deletion
+      // Workflows are managed locally, not via ComfyUI API
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Workflow deletion not yet implemented')),
+      );
       ref.invalidate(workflowListProvider);
     }
   }

@@ -2,15 +2,14 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/grid_config.dart';
 import '../providers/generation_provider.dart';
-import '../providers/session_provider.dart';
-import 'api_service.dart';
+import 'comfyui_service.dart';
+import 'comfyui_workflow_builder.dart';
 
 /// Grid generator service provider
 final gridGeneratorProvider =
     StateNotifierProvider<GridGeneratorNotifier, GridGenerationState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  final session = ref.watch(sessionProvider);
-  return GridGeneratorNotifier(apiService, session, ref);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return GridGeneratorNotifier(comfyService, ref);
 });
 
 /// Grid configuration editor provider
@@ -24,15 +23,14 @@ final gridConfigProvider =
 /// Manages the generation queue for grid parameter exploration.
 /// Handles calculating all parameter combinations and executing them sequentially.
 class GridGeneratorNotifier extends StateNotifier<GridGenerationState> {
-  final ApiService _apiService;
-  final SessionState _session;
-  // ignore: unused_field - kept for future provider access
+  final ComfyUIService _comfyService;
   final Ref _ref;
-  Timer? _pollTimer;
-  String? _currentGenerationId;
+  final ComfyUIWorkflowBuilder _workflowBuilder = ComfyUIWorkflowBuilder();
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
+  String? _currentPromptId;
   bool _shouldCancel = false;
 
-  GridGeneratorNotifier(this._apiService, this._session, this._ref)
+  GridGeneratorNotifier(this._comfyService, this._ref)
       : super(const GridGenerationState());
 
   /// Generate all combinations from the grid config
@@ -103,8 +101,8 @@ class GridGeneratorNotifier extends StateNotifier<GridGenerationState> {
 
   /// Start grid generation
   Future<void> startGeneration(GridConfig config, GenerationParams baseParams) async {
-    if (_session.sessionId == null) {
-      state = state.copyWith(error: 'Not connected');
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      state = state.copyWith(error: 'Not connected to ComfyUI');
       return;
     }
 
@@ -209,110 +207,74 @@ class GridGeneratorNotifier extends StateNotifier<GridGenerationState> {
   /// Generate a single image and wait for result
   Future<String?> _generateSingle(Map<String, dynamic> params) async {
     try {
-      // Map parameter names to API format
-      final apiParams = <String, dynamic>{
-        'session_id': _session.sessionId,
-        'images': 1,
-      };
-
-      // Copy and transform params
-      for (final entry in params.entries) {
-        final key = _toApiKey(entry.key);
-        apiParams[key] = entry.value;
-      }
-
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/GenerateText2ImageWS',
-        data: apiParams,
+      // Build workflow using ComfyUI workflow builder
+      final workflow = _workflowBuilder.buildText2Image(
+        model: params['model'] as String? ?? '',
+        prompt: params['prompt'] as String? ?? '',
+        negativePrompt: params['negativeprompt'] as String? ?? '',
+        width: params['width'] as int? ?? 1024,
+        height: params['height'] as int? ?? 1024,
+        steps: params['steps'] as int? ?? 20,
+        cfg: (params['cfgscale'] as num?)?.toDouble() ?? 7.0,
+        seed: params['seed'] as int? ?? -1,
+        sampler: params['sampler'] as String? ?? 'euler',
+        scheduler: params['scheduler'] as String? ?? 'normal',
       );
 
-      if (!response.isSuccess || response.data == null) {
+      // Queue the workflow
+      final promptId = await _comfyService.queuePrompt(workflow);
+      if (promptId == null) {
         return null;
       }
 
-      final data = response.data!;
-      final generationId = data['generation_id'] as String?;
+      _currentPromptId = promptId;
 
-      // Handle async generation - poll for result
-      if (data['status'] == 'generating' && generationId != null) {
-        _currentGenerationId = generationId;
-        return await _pollForResult(generationId);
-      }
-
-      // Handle synchronous completion
-      if (data['status'] == 'completed' && data['images'] != null) {
-        final images = (data['images'] as List).cast<String>();
-        if (images.isNotEmpty) {
-          return '${_apiService.baseUrl}${images.first}';
-        }
-      }
-
-      return null;
+      // Wait for completion via progress stream
+      return await _waitForCompletion(promptId);
     } catch (e) {
       return null;
     }
   }
 
-  /// Poll for generation result
-  Future<String?> _pollForResult(String generationId) async {
+  /// Wait for generation completion via ComfyUI progress stream
+  Future<String?> _waitForCompletion(String promptId) async {
     final completer = Completer<String?>();
-    const pollInterval = Duration(milliseconds: 500);
-    const maxPolls = 600; // 5 minutes max
-    int pollCount = 0;
 
-    Timer.periodic(pollInterval, (timer) async {
-      if (_shouldCancel || pollCount >= maxPolls) {
-        timer.cancel();
+    // Cancel any existing subscription
+    await _progressSubscription?.cancel();
+
+    // Listen to progress stream for this specific prompt
+    _progressSubscription = _comfyService.progressStream.listen((update) {
+      if (update.promptId != promptId) return;
+
+      if (update.isComplete && update.outputImages != null && update.outputImages!.isNotEmpty) {
+        if (!completer.isCompleted) {
+          completer.complete(update.outputImages!.first);
+        }
+      } else if (update.status == 'error' || update.status == 'interrupted') {
         if (!completer.isCompleted) {
           completer.complete(null);
         }
-        return;
-      }
-
-      pollCount++;
-
-      try {
-        final response = await _apiService.post<Map<String, dynamic>>(
-          '/api/GetProgress',
-          data: {'prompt_id': generationId},
-        );
-
-        if (response.isSuccess && response.data != null) {
-          final data = response.data!;
-          final status = data['status'] as String?;
-
-          if (status == 'completed') {
-            timer.cancel();
-            final images = data['images'] as List? ?? [];
-            if (images.isNotEmpty && !completer.isCompleted) {
-              completer.complete('${_apiService.baseUrl}${images.first}');
-            } else if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          } else if (status == 'error') {
-            timer.cancel();
-            if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          }
-        }
-      } catch (e) {
-        // Continue polling on error
       }
     });
 
-    return completer.future;
-  }
+    // Also listen to error stream
+    final errorSubscription = _comfyService.errorStream.listen((error) {
+      if (error.promptId == promptId && !completer.isCompleted) {
+        completer.complete(null);
+      }
+    });
 
-  /// Convert parameter name to API key format
-  String _toApiKey(String paramName) {
-    switch (paramName) {
-      case 'cfgScale':
-        return 'cfgscale';
-      case 'negativePrompt':
-        return 'negativeprompt';
-      default:
-        return paramName.toLowerCase();
+    try {
+      // Wait for completion with timeout
+      final result = await completer.future.timeout(
+        const Duration(minutes: 5),
+        onTimeout: () => null,
+      );
+      return result;
+    } finally {
+      await _progressSubscription?.cancel();
+      await errorSubscription.cancel();
     }
   }
 
@@ -346,18 +308,13 @@ class GridGeneratorNotifier extends StateNotifier<GridGenerationState> {
   /// Cancel generation
   Future<void> cancel() async {
     _shouldCancel = true;
-    _pollTimer?.cancel();
+    await _progressSubscription?.cancel();
 
-    // Try to cancel current generation
-    if (_currentGenerationId != null) {
-      try {
-        await _apiService.post('/api/InterruptGeneration', data: {
-          'session_id': _session.sessionId,
-          'generation_id': _currentGenerationId,
-        });
-      } catch (_) {
-        // Ignore cancel errors
-      }
+    // Try to cancel current generation via ComfyUI interrupt
+    try {
+      await _comfyService.interrupt();
+    } catch (_) {
+      // Ignore cancel errors
     }
 
     // Mark remaining items as cancelled
@@ -380,14 +337,14 @@ class GridGeneratorNotifier extends StateNotifier<GridGenerationState> {
   /// Reset state for new grid
   void reset() {
     _shouldCancel = false;
-    _pollTimer?.cancel();
-    _currentGenerationId = null;
+    _progressSubscription?.cancel();
+    _currentPromptId = null;
     state = const GridGenerationState();
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
+    _progressSubscription?.cancel();
     super.dispose();
   }
 }

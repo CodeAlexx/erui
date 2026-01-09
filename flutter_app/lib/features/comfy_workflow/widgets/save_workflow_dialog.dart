@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../services/api_service.dart';
+import '../../../services/comfyui_service.dart';
 
 /// Dialog for saving a new workflow
 class SaveWorkflowDialog extends ConsumerStatefulWidget {
@@ -53,7 +53,6 @@ class _SaveWorkflowDialogState extends ConsumerState<SaveWorkflowDialog> {
     setState(() => _isSaving = true);
 
     try {
-      final api = ref.read(apiServiceProvider);
       final name = _nameController.text.trim();
       final tags = _tagsController.text
           .split(',')
@@ -75,16 +74,14 @@ class _SaveWorkflowDialogState extends ConsumerState<SaveWorkflowDialog> {
           'parameters': widget.initialWorkflow!['parameters'],
       };
 
-      final response = await api.postJson('/api/workflows/$name', workflow);
-
-      if (response != null && response['success'] == true) {
-        if (mounted) Navigator.pop(context, workflow);
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to save: ${response?['error'] ?? 'Unknown error'}')),
-          );
-        }
+      // TODO: Implement local workflow storage
+      // ComfyUI doesn't have a built-in workflow save API
+      // Workflows can be saved locally or exported as JSON files
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Workflow saving to be implemented with local storage')),
+        );
+        Navigator.pop(context, workflow);
       }
     } catch (e) {
       if (mounted) {

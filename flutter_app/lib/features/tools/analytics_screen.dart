@@ -6,7 +6,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/storage_service.dart';
-import '../../services/api_service.dart';
 
 /// Usage Analytics Screen
 ///
@@ -1197,10 +1196,11 @@ class _RecentActivityList extends StatelessWidget {
 // =============================================================================
 
 /// Analytics provider
+/// Note: Analytics are tracked locally and don't require the ComfyUI backend.
+/// All statistics are stored in local storage and aggregated client-side.
 final analyticsProvider =
     StateNotifierProvider<AnalyticsNotifier, AnalyticsState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return AnalyticsNotifier(apiService);
+  return AnalyticsNotifier();
 });
 
 /// Date range filter
@@ -1390,21 +1390,21 @@ class AnalyticsState {
 }
 
 /// Analytics notifier
+/// Tracks usage analytics locally without requiring any backend API.
 class AnalyticsNotifier extends StateNotifier<AnalyticsState> {
-  final ApiService _apiService;
 
-  AnalyticsNotifier(this._apiService) : super(const AnalyticsState());
+  AnalyticsNotifier() : super(const AnalyticsState());
 
-  /// Load analytics data
+  /// Load analytics data from local storage
   Future<void> loadAnalytics() async {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      // Load from local storage first (cached data)
+      // Load from local storage cache first
       await _loadFromLocalStorage();
 
-      // Try to fetch fresh data from API
-      await _fetchFromApi();
+      // Load local tracking data (generation history)
+      await _loadLocalTrackingData();
 
       state = state.copyWith(isLoading: false);
     } catch (e) {
@@ -1426,32 +1426,6 @@ class AnalyticsNotifier extends StateNotifier<AnalyticsState> {
     final cachedData = StorageService.getMap('analytics_cache');
     if (cachedData != null) {
       _applyAnalyticsData(cachedData);
-    }
-  }
-
-  /// Fetch analytics from API
-  Future<void> _fetchFromApi() async {
-    try {
-      // Calculate date range based on filter
-      final dateRange = _getDateRange(state.dateFilter);
-
-      // Fetch analytics data from backend
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/API/GetAnalytics',
-        data: {
-          'start_date': dateRange.start.toIso8601String(),
-          'end_date': dateRange.end.toIso8601String(),
-        },
-      );
-
-      if (response.isSuccess && response.data != null) {
-        _applyAnalyticsData(response.data!);
-        // Cache the data
-        await StorageService.setMap('analytics_cache', response.data!);
-      }
-    } catch (e) {
-      // If API fails, use local tracking data
-      await _loadLocalTrackingData();
     }
   }
 

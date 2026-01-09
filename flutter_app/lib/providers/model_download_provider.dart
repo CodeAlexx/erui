@@ -1,13 +1,13 @@
 import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
 
 /// Model download provider for tracking download state
+/// Note: ComfyUI does not have built-in model download capabilities.
+/// This provider maintains the interface for future external download solutions.
 final modelDownloadProvider =
     StateNotifierProvider<ModelDownloadNotifier, ModelDownloadState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return ModelDownloadNotifier(apiService);
+  return ModelDownloadNotifier();
 });
 
 /// Download item representing a single model download
@@ -96,6 +96,7 @@ enum DownloadStatus {
   completed,
   failed,
   cancelled,
+  notSupported,
 }
 
 /// Model download state
@@ -103,11 +104,16 @@ class ModelDownloadState {
   final List<DownloadItem> downloads;
   final bool isProcessing;
   final String? currentDownloadId;
+  final bool isSupported;
+  final String? notSupportedMessage;
 
   const ModelDownloadState({
     this.downloads = const [],
     this.isProcessing = false,
     this.currentDownloadId,
+    this.isSupported = false,
+    this.notSupportedMessage = 'Model downloading is not available with direct ComfyUI connection. '
+        'Please download models manually and place them in the appropriate ComfyUI folders.',
   });
 
   /// Get active downloads
@@ -130,11 +136,15 @@ class ModelDownloadState {
     List<DownloadItem>? downloads,
     bool? isProcessing,
     String? currentDownloadId,
+    bool? isSupported,
+    String? notSupportedMessage,
   }) {
     return ModelDownloadState(
       downloads: downloads ?? this.downloads,
       isProcessing: isProcessing ?? this.isProcessing,
       currentDownloadId: currentDownloadId ?? this.currentDownloadId,
+      isSupported: isSupported ?? this.isSupported,
+      notSupportedMessage: notSupportedMessage ?? this.notSupportedMessage,
     );
   }
 }
@@ -165,26 +175,22 @@ class CivitAIModelInfo {
   String get targetFolder {
     switch (type.toLowerCase()) {
       case 'checkpoint':
-        return 'Stable-Diffusion';
+        return 'checkpoints';
       case 'lora':
-        return 'Lora';
+        return 'loras';
       case 'textualinversion':
       case 'embedding':
-        return 'Embedding';
+        return 'embeddings';
       case 'vae':
-        return 'VAE';
+        return 'vae';
       case 'controlnet':
-        return 'ControlNet';
+        return 'controlnet';
       case 'hypernetwork':
-        return 'hypernetwork';
-      case 'aestheticgradient':
-        return 'aesthetic_embeddings';
-      case 'poses':
-        return 'poses';
-      case 'wildcards':
-        return 'wildcards';
+        return 'hypernetworks';
       case 'locon':
-        return 'Lora';
+        return 'loras';
+      case 'upscaler':
+        return 'upscale_models';
       default:
         return 'other';
     }
@@ -192,11 +198,12 @@ class CivitAIModelInfo {
 }
 
 /// Model download notifier
+/// Note: ComfyUI does not have built-in model download capabilities.
+/// This notifier maintains the interface but returns "not supported" for all operations.
 class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
-  final ApiService _apiService;
   final Dio _dio;
 
-  ModelDownloadNotifier(this._apiService)
+  ModelDownloadNotifier()
       : _dio = Dio(BaseOptions(
           connectTimeout: const Duration(seconds: 30),
           receiveTimeout: const Duration(hours: 2),
@@ -204,6 +211,7 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
         super(const ModelDownloadState());
 
   /// Parse CivitAI URL to get model info
+  /// This can still be used to get model information even if downloading is not supported
   Future<CivitAIModelInfo?> parseCivitAIUrl(String input) async {
     // Support formats:
     // - https://civitai.com/models/12345
@@ -383,6 +391,7 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
   }
 
   /// Add a download to the queue
+  /// Note: This always fails with ComfyUI as it doesn't support model downloads
   Future<String?> addDownload({
     required String url,
     required String name,
@@ -390,8 +399,9 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
     required String targetFolder,
     int? totalBytes,
   }) async {
+    // ComfyUI doesn't support model downloads
+    // Return error immediately
     final id = DateTime.now().millisecondsSinceEpoch.toString();
-    final cancelToken = CancelToken();
 
     final download = DownloadItem(
       id: id,
@@ -399,33 +409,32 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
       name: name,
       modelType: modelType,
       targetFolder: targetFolder,
-      status: DownloadStatus.queued,
+      status: DownloadStatus.notSupported,
       totalBytes: totalBytes,
       createdAt: DateTime.now(),
-      cancelToken: cancelToken,
+      error: 'Model downloading is not available with direct ComfyUI connection. '
+          'Please download this model manually from: $url\n'
+          'Place the downloaded file in: ComfyUI/models/$targetFolder/',
     );
 
     state = state.copyWith(
       downloads: [...state.downloads, download],
     );
 
-    // Start processing queue if not already
-    if (!state.isProcessing) {
-      _processQueue();
-    }
-
-    return id;
+    return null; // Return null to indicate failure
   }
 
   /// Add download from CivitAI URL
+  /// Note: This always fails with ComfyUI as it doesn't support model downloads
   Future<String?> addDownloadFromCivitAI(String input) async {
     final info = await parseCivitAIUrl(input);
-    if (info == null || info.downloadUrl == null) {
+    if (info == null) {
       return null;
     }
 
+    // Even if we get model info, downloading is not supported
     return addDownload(
-      url: info.downloadUrl!,
+      url: info.downloadUrl ?? 'https://civitai.com/models/${info.modelId}',
       name: info.fileName ?? '${info.name}.safetensors',
       modelType: info.type,
       targetFolder: info.targetFolder,
@@ -433,126 +442,23 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
     );
   }
 
-  /// Process download queue
-  Future<void> _processQueue() async {
-    if (state.isProcessing) return;
-
-    state = state.copyWith(isProcessing: true);
-
-    while (true) {
-      // Find next queued download
-      final nextDownload = state.downloads.firstWhere(
-        (d) => d.status == DownloadStatus.queued,
-        orElse: () => DownloadItem(
-          id: '',
-          url: '',
-          name: '',
-          modelType: '',
-          targetFolder: '',
-          createdAt: DateTime.now(),
-        ),
-      );
-
-      if (nextDownload.id.isEmpty) {
-        break;
-      }
-
-      state = state.copyWith(currentDownloadId: nextDownload.id);
-
-      // Update status to downloading
-      _updateDownload(nextDownload.id, status: DownloadStatus.downloading);
-
-      try {
-        await _performDownload(nextDownload);
-        _updateDownload(nextDownload.id,
-          status: DownloadStatus.completed,
-          progress: 1.0,
-        );
-      } catch (e) {
-        if (e is DioException && e.type == DioExceptionType.cancel) {
-          _updateDownload(nextDownload.id,
-            status: DownloadStatus.cancelled,
-            error: 'Download cancelled',
-          );
-        } else {
-          _updateDownload(nextDownload.id,
-            status: DownloadStatus.failed,
-            error: e.toString(),
-          );
-        }
-      }
-    }
-
-    state = state.copyWith(isProcessing: false, currentDownloadId: null);
-  }
-
-  /// Perform the actual download via backend proxy
-  Future<void> _performDownload(DownloadItem download) async {
-    // Use backend to proxy the download
-    final response = await _apiService.post<Map<String, dynamic>>(
-      '/API/DownloadModel',
-      data: {
-        'url': download.url,
-        'name': download.name,
-        'folder': download.targetFolder,
-      },
+  /// Cancel a download
+  void cancelDownload(String id) {
+    final download = state.downloads.firstWhere(
+      (d) => d.id == id,
+      orElse: () => DownloadItem(
+        id: '',
+        url: '',
+        name: '',
+        modelType: '',
+        targetFolder: '',
+        createdAt: DateTime.now(),
+      ),
     );
 
-    if (!response.isSuccess) {
-      throw Exception(response.error ?? 'Download failed');
-    }
-
-    // Poll for download progress
-    final downloadId = response.data?['download_id'] as String?;
-    if (downloadId == null) {
-      throw Exception('No download ID returned');
-    }
-
-    while (true) {
-      await Future.delayed(const Duration(milliseconds: 500));
-
-      // Check if cancelled
-      if (download.cancelToken?.isCancelled ?? false) {
-        // Cancel on backend too
-        await _apiService.post<Map<String, dynamic>>(
-          '/API/CancelDownload',
-          data: {'download_id': downloadId},
-        );
-        throw DioException(
-          requestOptions: RequestOptions(path: ''),
-          type: DioExceptionType.cancel,
-        );
-      }
-
-      final statusResponse = await _apiService.post<Map<String, dynamic>>(
-        '/API/GetDownloadStatus',
-        data: {'download_id': downloadId},
-      );
-
-      if (!statusResponse.isSuccess) {
-        throw Exception(statusResponse.error ?? 'Failed to get status');
-      }
-
-      final status = statusResponse.data!;
-      final progressValue = status['progress'] as double? ?? 0.0;
-      final downloadedBytes = status['downloaded_bytes'] as int?;
-      final totalBytes = status['total_bytes'] as int?;
-      final isDone = status['done'] as bool? ?? false;
-      final errorMsg = status['error'] as String?;
-
-      _updateDownload(download.id,
-        progress: progressValue,
-        downloadedBytes: downloadedBytes,
-        totalBytes: totalBytes,
-      );
-
-      if (errorMsg != null) {
-        throw Exception(errorMsg);
-      }
-
-      if (isDone) {
-        break;
-      }
+    if (download.id.isNotEmpty) {
+      download.cancelToken?.cancel();
+      _updateDownload(id, status: DownloadStatus.cancelled, error: 'Cancelled by user');
     }
   }
 
@@ -580,26 +486,6 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
     );
   }
 
-  /// Cancel a download
-  void cancelDownload(String id) {
-    final download = state.downloads.firstWhere(
-      (d) => d.id == id,
-      orElse: () => DownloadItem(
-        id: '',
-        url: '',
-        name: '',
-        modelType: '',
-        targetFolder: '',
-        createdAt: DateTime.now(),
-      ),
-    );
-
-    if (download.id.isNotEmpty) {
-      download.cancelToken?.cancel();
-      _updateDownload(id, status: DownloadStatus.cancelled, error: 'Cancelled by user');
-    }
-  }
-
   /// Remove a download from the list
   void removeDownload(String id) {
     state = state.copyWith(
@@ -616,12 +502,12 @@ class ModelDownloadNotifier extends StateNotifier<ModelDownloadState> {
     );
   }
 
-  /// Retry a failed download
+  /// Retry a failed download (still won't work with ComfyUI)
   void retryDownload(String id) {
-    _updateDownload(id, status: DownloadStatus.queued, error: null, progress: 0.0);
-
-    if (!state.isProcessing) {
-      _processQueue();
-    }
+    _updateDownload(id,
+      status: DownloadStatus.notSupported,
+      error: 'Model downloading is not available with direct ComfyUI connection.',
+      progress: 0.0,
+    );
   }
 }

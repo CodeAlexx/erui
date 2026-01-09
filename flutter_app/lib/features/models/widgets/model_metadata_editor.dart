@@ -5,7 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:convert';
 
 import '../../../providers/providers.dart';
-import '../../../services/api_service.dart';
+import '../../../services/comfyui_service.dart';
 
 /// Model metadata editor dialog - similar to SwarmUI's Edit Metadata
 class ModelMetadataEditor extends ConsumerStatefulWidget {
@@ -112,34 +112,11 @@ class _ModelMetadataEditorState extends ConsumerState<ModelMetadataEditor> {
     });
 
     try {
-      final apiService = ref.read(apiServiceProvider);
-      final response = await apiService.get<Map<String, dynamic>>(
-        '/api/model/metadata',
-        queryParameters: {
-          'model': widget.model.name,
-          'type': widget.model.type,
-        },
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        _titleController.text = data['title'] ?? widget.model.displayName;
-        _authorController.text = data['author'] ?? '';
-        _resolutionController.text = data['standard_resolution'] ?? '';
-        _licenseController.text = data['license'] ?? '';
-        _dateController.text = data['date'] ?? '';
-        _mergedFromController.text = data['merged_from'] ?? '';
-        _tagsController.text = (data['tags'] as List?)?.join(', ') ?? '';
-        _usageHintController.text = data['usage_hint'] ?? '';
-        _triggerPhraseController.text = data['trigger_phrase'] ?? '';
-        _descriptionController.text = data['description'] ?? '';
-        _architecture = data['architecture'] ?? _architecture;
-        _predictionType = data['prediction_type'] ?? _predictionType;
-        _previewImageUrl = data['preview_image'] ?? widget.model.previewUrl;
-        _hash = data['hash'];
-        _createdDate = data['created'];
-        _modifiedDate = data['modified'];
-      }
+      // Note: ComfyUI doesn't have a built-in metadata API
+      // For now, just populate with basic model info
+      // Model metadata could be stored locally or via a separate service
+      _titleController.text = widget.model.displayName;
+      _previewImageUrl = widget.model.previewUrl;
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -153,40 +130,14 @@ class _ModelMetadataEditorState extends ConsumerState<ModelMetadataEditor> {
     setState(() => _isSaving = true);
 
     try {
-      final apiService = ref.read(apiServiceProvider);
-      final metadata = {
-        'model': widget.model.name,
-        'type': widget.model.type,
-        'metadata': {
-          'title': _titleController.text,
-          'author': _authorController.text,
-          'architecture': _architecture,
-          'prediction_type': _predictionType,
-          'standard_resolution': _resolutionController.text,
-          'license': _licenseController.text,
-          'date': _dateController.text,
-          'merged_from': _mergedFromController.text,
-          'tags': _tagsController.text.split(',').map((t) => t.trim()).where((t) => t.isNotEmpty).toList(),
-          'usage_hint': _usageHintController.text,
-          'trigger_phrase': _triggerPhraseController.text,
-          'description': _descriptionController.text,
-        },
-      };
-
-      final response = await apiService.post<Map<String, dynamic>>(
-        '/api/model/metadata',
-        data: metadata,
-      );
-
-      if (response.isSuccess) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Metadata saved successfully')),
-          );
-          Navigator.of(context).pop(true);
-        }
-      } else {
-        throw Exception(response.error ?? 'Failed to save metadata');
+      // Note: ComfyUI doesn't have a built-in metadata save API
+      // Model metadata would need to be stored locally or via a separate service
+      // For now, just show success and close
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Metadata editing not yet supported with ComfyUI backend')),
+        );
+        Navigator.of(context).pop(false);
       }
     } catch (e) {
       if (mounted) {
@@ -207,79 +158,19 @@ class _ModelMetadataEditorState extends ConsumerState<ModelMetadataEditor> {
       return;
     }
 
-    setState(() => _isSaving = true);
-
-    try {
-      final apiService = ref.read(apiServiceProvider);
-      final response = await apiService.post<Map<String, dynamic>>(
-        '/api/model/preview/upload',
-        data: {
-          'model': widget.model.name,
-          'type': widget.model.type,
-          'image_url': widget.currentImageUrl,
-        },
-      );
-
-      if (response.isSuccess) {
-        setState(() {
-          _previewImageUrl = response.data?['preview_path'] ?? widget.currentImageUrl;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Preview image updated')),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isSaving = false);
-    }
+    // Note: ComfyUI doesn't have a preview image upload API
+    // Preview images would need to be managed locally
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Preview image upload not yet supported with ComfyUI backend')),
+    );
   }
 
   Future<void> _loadFromCivitai() async {
-    final url = _civitaiUrlController.text.trim();
-
-    setState(() => _isLoading = true);
-
-    try {
-      final apiService = ref.read(apiServiceProvider);
-      final response = await apiService.post<Map<String, dynamic>>(
-        '/api/model/civitai/load',
-        data: {
-          'model': widget.model.name,
-          'type': widget.model.type,
-          'url': url.isEmpty ? null : url, // null = use hash
-        },
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        if (data['title'] != null) _titleController.text = data['title'];
-        if (data['author'] != null) _authorController.text = data['author'];
-        if (data['description'] != null) _descriptionController.text = data['description'];
-        if (data['tags'] != null) _tagsController.text = (data['tags'] as List).join(', ');
-        if (data['trigger_phrase'] != null) _triggerPhraseController.text = data['trigger_phrase'];
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Loaded metadata from CivitAI')),
-        );
-      } else {
-        throw Exception(response.error ?? 'Model not found on CivitAI');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('CivitAI: $e')),
-        );
-      }
-    } finally {
-      setState(() => _isLoading = false);
-    }
+    // Note: CivitAI integration requires a separate service
+    // This feature is not available with direct ComfyUI backend
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('CivitAI integration not yet available with ComfyUI backend')),
+    );
   }
 
   @override

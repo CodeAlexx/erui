@@ -10,7 +10,8 @@ import 'package:http/http.dart' as http;
 
 import '../../providers/generation_provider.dart';
 import '../../providers/session_provider.dart';
-import '../../services/api_service.dart';
+import '../../services/comfyui_service.dart';
+import '../../services/comfyui_workflow_builder.dart';
 import '../../widgets/image_viewer_dialog.dart';
 
 /// Batch Processing Screen
@@ -1105,9 +1106,9 @@ class _ResultCell extends StatelessWidget {
 /// Batch processing state provider
 final batchProcessingProvider =
     StateNotifierProvider<BatchProcessingNotifier, BatchProcessingState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
+  final comfyService = ref.watch(comfyUIServiceProvider);
   final session = ref.watch(sessionProvider);
-  return BatchProcessingNotifier(apiService, session);
+  return BatchProcessingNotifier(comfyService, session);
 });
 
 /// Processing mode
@@ -1306,13 +1307,14 @@ class BatchProcessingState {
 
 /// Batch processing state notifier
 class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
   final SessionState _session;
   bool _shouldCancel = false;
-  String? _currentGenerationId;
+  String? _currentPromptId;
   GenerationParams? _baseParams;
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
 
-  BatchProcessingNotifier(this._apiService, this._session)
+  BatchProcessingNotifier(this._comfyService, this._session)
       : super(const BatchProcessingState());
 
   /// Set prompts
@@ -1381,8 +1383,8 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
 
   /// Start batch processing
   Future<void> startProcessing(GenerationParams baseParams) async {
-    if (_session.sessionId == null) {
-      state = state.copyWith(error: 'Not connected');
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      state = state.copyWith(error: 'Not connected to ComfyUI');
       return;
     }
 
@@ -1521,120 +1523,127 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
     }
   }
 
-  /// Generate a single image
+  /// Generate a single image using ComfyUI
   Future<String?> _generateSingle(
       GenerationParams baseParams, BatchProcessingResult result) async {
     try {
       final prompt = result.prompt ?? baseParams.prompt;
 
       // Build init image data if provided
-      String? initImageData;
+      String? initImageBase64;
       if (result.initImagePath != null) {
         final file = File(result.initImagePath!);
         if (await file.exists()) {
           final bytes = await file.readAsBytes();
-          initImageData = 'data:image/png;base64,${base64Encode(bytes)}';
+          initImageBase64 = base64Encode(bytes);
         }
       }
 
-      final apiParams = <String, dynamic>{
-        'session_id': _session.sessionId,
-        'prompt': prompt,
-        'negativeprompt': baseParams.negativePrompt,
-        'model': baseParams.model,
-        'width': baseParams.width,
-        'height': baseParams.height,
-        'steps': baseParams.steps,
-        'cfgscale': baseParams.cfgScale,
-        'seed': baseParams.seed,
-        'sampler': baseParams.sampler,
-        'scheduler': baseParams.scheduler,
-        'images': 1,
-        if (initImageData != null) 'initimage': initImageData,
-        if (initImageData != null) 'initimagecreativity': baseParams.initImageCreativity,
-      };
-
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/GenerateText2ImageWS',
-        data: apiParams,
+      // Build ComfyUI workflow
+      final builder = ComfyUIWorkflowBuilder();
+      final workflow = builder.buildText2Image(
+        model: baseParams.model ?? 'model.safetensors',
+        prompt: prompt,
+        negativePrompt: baseParams.negativePrompt,
+        width: baseParams.width,
+        height: baseParams.height,
+        steps: baseParams.steps,
+        cfg: baseParams.cfgScale,
+        seed: baseParams.seed,
+        sampler: baseParams.sampler,
+        scheduler: baseParams.scheduler,
+        initImageBase64: initImageBase64,
+        denoise: initImageBase64 != null ? baseParams.initImageCreativity : 1.0,
+        filenamePrefix: 'batch',
       );
 
-      if (!response.isSuccess || response.data == null) {
+      // Queue the prompt
+      final promptId = await _comfyService.queuePrompt(workflow);
+      if (promptId == null) {
         return null;
       }
 
-      final data = response.data!;
-      final generationId = data['generation_id'] as String?;
+      _currentPromptId = promptId;
 
-      // Handle async generation
-      if (data['status'] == 'generating' && generationId != null) {
-        _currentGenerationId = generationId;
-        return await _pollForResult(generationId);
-      }
-
-      // Handle sync completion
-      if (data['status'] == 'completed' && data['images'] != null) {
-        final images = (data['images'] as List).cast<String>();
-        if (images.isNotEmpty) {
-          return '${_apiService.baseUrl}${images.first}';
-        }
-      }
-
-      return null;
+      // Wait for completion via WebSocket progress stream
+      return await _waitForCompletion(promptId);
     } catch (e) {
       return null;
     }
   }
 
-  /// Poll for generation result
-  Future<String?> _pollForResult(String generationId) async {
+  /// Wait for ComfyUI generation to complete
+  Future<String?> _waitForCompletion(String promptId) async {
     final completer = Completer<String?>();
-    const pollInterval = Duration(milliseconds: 500);
-    const maxPolls = 600; // 5 minutes max
-    int pollCount = 0;
 
-    Timer.periodic(pollInterval, (timer) async {
-      if (_shouldCancel || pollCount >= maxPolls) {
-        timer.cancel();
+    // Listen to progress stream for completion
+    _progressSubscription?.cancel();
+    _progressSubscription = _comfyService.progressStream.listen((update) {
+      if (update.promptId == promptId) {
+        if (update.isComplete) {
+          _progressSubscription?.cancel();
+          if (update.outputImages != null && update.outputImages!.isNotEmpty) {
+            if (!completer.isCompleted) {
+              completer.complete(update.outputImages!.first);
+            }
+          } else {
+            // Try to get images from history
+            _getImagesFromHistory(promptId).then((images) {
+              if (!completer.isCompleted) {
+                completer.complete(images.isNotEmpty ? images.first : null);
+              }
+            });
+          }
+        } else if (update.status == 'error') {
+          _progressSubscription?.cancel();
+          if (!completer.isCompleted) {
+            completer.complete(null);
+          }
+        }
+      }
+    });
+
+    // Also listen for errors
+    final errorSubscription = _comfyService.errorStream.listen((error) {
+      if (error.promptId == promptId) {
+        _progressSubscription?.cancel();
         if (!completer.isCompleted) {
           completer.complete(null);
         }
-        return;
       }
+    });
 
-      pollCount++;
+    // Timeout after 5 minutes
+    Future.delayed(const Duration(minutes: 5), () {
+      if (!completer.isCompleted) {
+        _progressSubscription?.cancel();
+        errorSubscription.cancel();
+        completer.complete(null);
+      }
+    });
 
-      try {
-        final response = await _apiService.post<Map<String, dynamic>>(
-          '/api/GetProgress',
-          data: {'prompt_id': generationId},
-        );
-
-        if (response.isSuccess && response.data != null) {
-          final data = response.data!;
-          final status = data['status'] as String?;
-
-          if (status == 'completed') {
-            timer.cancel();
-            final images = data['images'] as List? ?? [];
-            if (images.isNotEmpty && !completer.isCompleted) {
-              completer.complete('${_apiService.baseUrl}${images.first}');
-            } else if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          } else if (status == 'error') {
-            timer.cancel();
-            if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          }
+    // Also check if cancelled
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (_shouldCancel) {
+        timer.cancel();
+        _progressSubscription?.cancel();
+        errorSubscription.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(null);
         }
-      } catch (e) {
-        // Continue polling on error
+      }
+      if (completer.isCompleted) {
+        timer.cancel();
+        errorSubscription.cancel();
       }
     });
 
     return completer.future;
+  }
+
+  /// Get images from ComfyUI history
+  Future<List<String>> _getImagesFromHistory(String promptId) async {
+    return await _comfyService.getOutputImages(promptId);
   }
 
   /// Update result status
@@ -1668,17 +1677,13 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
   /// Cancel processing
   Future<void> cancel() async {
     _shouldCancel = true;
+    _progressSubscription?.cancel();
 
-    // Try to cancel current generation
-    if (_currentGenerationId != null) {
-      try {
-        await _apiService.post('/api/InterruptGeneration', data: {
-          'session_id': _session.sessionId,
-          'generation_id': _currentGenerationId,
-        });
-      } catch (_) {
-        // Ignore cancel errors
-      }
+    // Try to cancel current generation via ComfyUI
+    try {
+      await _comfyService.interrupt();
+    } catch (_) {
+      // Ignore cancel errors
     }
 
     // Mark remaining as cancelled
@@ -1708,9 +1713,12 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
       if (result.imageUrl == null) continue;
 
       try {
-        // Download image
-        final response = await _apiService.downloadFile(result.imageUrl!);
-        if (response == null) continue;
+        // Download image from ComfyUI
+        final response = await Dio().get<List<int>>(
+          result.imageUrl!,
+          options: Options(responseType: ResponseType.bytes),
+        );
+        if (response.data == null) continue;
 
         // Generate filename
         String filename;
@@ -1727,7 +1735,7 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
         // Save file
         final outputPath = path.join(folderPath, filename);
         final file = File(outputPath);
-        await file.writeAsBytes(response);
+        await file.writeAsBytes(response.data!);
       } catch (e) {
         // Continue with next file on error
       }
@@ -1737,23 +1745,9 @@ class BatchProcessingNotifier extends StateNotifier<BatchProcessingState> {
   /// Reset state
   void reset() {
     _shouldCancel = false;
-    _currentGenerationId = null;
+    _currentPromptId = null;
     _baseParams = null;
+    _progressSubscription?.cancel();
     state = const BatchProcessingState();
-  }
-}
-
-// Extension for ApiService to support file downloads
-extension ApiServiceExtension on ApiService {
-  Future<List<int>?> downloadFile(String url) async {
-    try {
-      final response = await Dio().get<List<int>>(
-        url,
-        options: Options(responseType: ResponseType.bytes),
-      );
-      return response.data;
-    } catch (e) {
-      return null;
-    }
   }
 }

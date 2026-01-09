@@ -1,32 +1,32 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 import '../services/storage_service.dart';
 
 /// Connection state provider
 final connectionStateProvider =
     StateNotifierProvider<ConnectionNotifier, ConnectionInfo>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return ConnectionNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return ConnectionNotifier(comfyService);
 });
 
 /// Connection information
 class ConnectionInfo {
   final String host;
   final int port;
-  final ApiConnectionState state;
+  final ComfyConnectionState state;
   final String? errorMessage;
 
   const ConnectionInfo({
     this.host = 'localhost',
-    this.port = 7803,
-    this.state = ApiConnectionState.disconnected,
+    this.port = 8188,
+    this.state = ComfyConnectionState.disconnected,
     this.errorMessage,
   });
 
   ConnectionInfo copyWith({
     String? host,
     int? port,
-    ApiConnectionState? state,
+    ComfyConnectionState? state,
     String? errorMessage,
   }) {
     return ConnectionInfo(
@@ -37,19 +37,19 @@ class ConnectionInfo {
     );
   }
 
-  bool get isConnected => state == ApiConnectionState.connected;
-  bool get isConnecting => state == ApiConnectionState.connecting;
-  bool get hasError => state == ApiConnectionState.error;
+  bool get isConnected => state == ComfyConnectionState.connected;
+  bool get isConnecting => state == ComfyConnectionState.connecting;
+  bool get hasError => state == ComfyConnectionState.error;
 
   String get statusText {
     switch (state) {
-      case ApiConnectionState.disconnected:
+      case ComfyConnectionState.disconnected:
         return 'Disconnected';
-      case ApiConnectionState.connecting:
+      case ComfyConnectionState.connecting:
         return 'Connecting...';
-      case ApiConnectionState.connected:
+      case ComfyConnectionState.connected:
         return 'Connected';
-      case ApiConnectionState.error:
+      case ComfyConnectionState.error:
         return errorMessage ?? 'Error';
     }
   }
@@ -57,9 +57,9 @@ class ConnectionInfo {
 
 /// Connection state notifier
 class ConnectionNotifier extends StateNotifier<ConnectionInfo> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  ConnectionNotifier(this._apiService) : super(const ConnectionInfo()) {
+  ConnectionNotifier(this._comfyService) : super(const ConnectionInfo()) {
     _loadSavedConnection();
     _listenToConnectionState();
     // Auto-connect on startup
@@ -68,16 +68,16 @@ class ConnectionNotifier extends StateNotifier<ConnectionInfo> {
 
   /// Load saved connection settings
   Future<void> _loadSavedConnection() async {
-    final host = StorageService.getStringStatic('backend_host') ?? 'localhost';
-    final port = StorageService.getInt('backend_port') ?? 7803;
+    final host = StorageService.getStringStatic('comfyui_host') ?? 'localhost';
+    final port = StorageService.getInt('comfyui_port') ?? 8188;
 
     state = state.copyWith(host: host, port: port);
-    _apiService.configure(host: host, port: port);
+    _comfyService.configure(host: host, port: port);
   }
 
   /// Listen to connection state changes
   void _listenToConnectionState() {
-    _apiService.connectionState.listen((connectionState) {
+    _comfyService.connectionState.listen((connectionState) {
       state = state.copyWith(state: connectionState);
     });
   }
@@ -86,43 +86,43 @@ class ConnectionNotifier extends StateNotifier<ConnectionInfo> {
   Future<void> updateSettings({required String host, required int port}) async {
     state = state.copyWith(host: host, port: port);
 
-    await StorageService.setStringStatic('backend_host', host);
-    await StorageService.setInt('backend_port', port);
+    await StorageService.setStringStatic('comfyui_host', host);
+    await StorageService.setInt('comfyui_port', port);
 
-    _apiService.configure(host: host, port: port);
+    _comfyService.configure(host: host, port: port);
   }
 
-  /// Connect to backend
+  /// Connect to ComfyUI backend
   Future<bool> connect() async {
     state = state.copyWith(
-      state: ApiConnectionState.connecting,
+      state: ComfyConnectionState.connecting,
       errorMessage: null,
     );
 
     try {
-      final success = await _apiService.connect();
+      final success = await _comfyService.connect();
       if (success) {
-        state = state.copyWith(state: ApiConnectionState.connected);
+        state = state.copyWith(state: ComfyConnectionState.connected);
         return true;
       } else {
         state = state.copyWith(
-          state: ApiConnectionState.error,
-          errorMessage: 'Failed to connect',
+          state: ComfyConnectionState.error,
+          errorMessage: 'Failed to connect to ComfyUI',
         );
         return false;
       }
     } catch (e) {
       state = state.copyWith(
-        state: ApiConnectionState.error,
+        state: ComfyConnectionState.error,
         errorMessage: e.toString(),
       );
       return false;
     }
   }
 
-  /// Disconnect from backend
+  /// Disconnect from ComfyUI backend
   Future<void> disconnect() async {
-    await _apiService.disconnect();
-    state = state.copyWith(state: ApiConnectionState.disconnected);
+    await _comfyService.disconnect();
+    state = state.copyWith(state: ComfyConnectionState.disconnected);
   }
 }

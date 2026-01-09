@@ -5,19 +5,20 @@ import 'package:uuid/uuid.dart';
 import '../models/queue_item.dart';
 import '../providers/generation_provider.dart';
 import '../providers/lora_provider.dart';
-import '../providers/session_provider.dart';
-import 'api_service.dart';
+import 'comfyui_service.dart';
+import 'comfyui_workflow_builder.dart';
 
 /// Generation queue service provider
 final generationQueueServiceProvider = Provider<GenerationQueueService>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return GenerationQueueService(ref, apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return GenerationQueueService(ref, comfyService);
 });
 
 /// Service for managing the generation queue
 class GenerationQueueService {
   final Ref _ref;
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
+  final ComfyUIWorkflowBuilder _workflowBuilder = ComfyUIWorkflowBuilder();
 
   /// List of queue items
   final List<QueueItem> _items = [];
@@ -37,10 +38,13 @@ class GenerationQueueService {
   /// Stream controller for processing state
   final _processingController = StreamController<bool>.broadcast();
 
-  /// Poll timer for progress updates
-  Timer? _pollTimer;
+  /// Subscription to ComfyUI progress stream
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
 
-  GenerationQueueService(this._ref, this._apiService);
+  /// Current prompt ID being processed
+  String? _currentPromptId;
+
+  GenerationQueueService(this._ref, this._comfyService);
 
   /// Get all queue items
   List<QueueItem> get items => List.unmodifiable(_items);
@@ -351,10 +355,8 @@ class GenerationQueueService {
 
   /// Execute a generation request
   Future<void> _executeGeneration(QueueItem item) async {
-    final session = _ref.read(sessionProvider);
-
-    if (session.sessionId == null) {
-      throw Exception('Not connected to server');
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      throw Exception('Not connected to ComfyUI');
     }
 
     // Use video model if in video mode, otherwise regular model
@@ -362,128 +364,120 @@ class GenerationQueueService {
         ? (item.params.videoModel ?? item.params.model)
         : item.params.model;
 
-    final response = await _apiService.post<Map<String, dynamic>>(
-      '/api/GenerateText2ImageWS',
-      data: {
-        'session_id': session.sessionId,
-        'prompt': item.params.prompt,
-        'negativeprompt': item.params.negativePrompt,
-        'model': modelToUse,
-        'width': item.params.width,
-        'height': item.params.height,
-        'steps': item.params.steps,
-        'cfgscale': item.params.cfgScale,
-        'seed': item.params.seed,
-        'sampler': item.params.sampler,
-        'scheduler': item.params.scheduler,
-        'images': 1, // Process one at a time
-        if (item.loras != null && item.loras!.isNotEmpty)
-          'loras': item.loras!.map((l) => l.toJson()).toList(),
-        // Video parameters
-        if (item.params.videoMode) 'video_mode': true,
-        if (item.params.videoMode) 'frames': item.params.frames,
-        if (item.params.videoMode) 'fps': item.params.fps,
-        if (item.params.videoMode) 'video_format': item.params.videoFormat,
-        // Variation seed parameters
-        if (item.params.variationSeed != null) 'variationseed': item.params.variationSeed,
-        if (item.params.variationStrength > 0) 'variationseedstrength': item.params.variationStrength,
-        // Init image (img2img) parameters
-        if (item.params.initImage != null) 'initimage': item.params.initImage,
-        if (item.params.initImage != null) 'initimagecreativity': item.params.initImageCreativity,
-        // Refine/Upscale parameters
-        if (item.params.refinerModel != null && item.params.refinerModel != 'None')
-          'refinermodel': item.params.refinerModel,
-        if (item.params.upscaleFactor > 1.0) 'upscale': item.params.upscaleFactor,
-        // ControlNet parameters
-        if (item.params.controlNetImage != null) 'controlnetimage': item.params.controlNetImage,
-        if (item.params.controlNetModel != null && item.params.controlNetModel != 'None')
-          'controlnetmodel': item.params.controlNetModel,
-        if (item.params.controlNetModel != null && item.params.controlNetModel != 'None')
-          'controlnetstrength': item.params.controlNetStrength,
-        ...item.params.extraParams,
-      },
-    );
-
-    if (!response.isSuccess || response.data == null) {
-      throw Exception(response.error ?? 'Generation request failed');
+    // Build LoRA configs if present
+    List<LoraConfig>? loraConfigs;
+    if (item.loras != null && item.loras!.isNotEmpty) {
+      loraConfigs = item.loras!.map((l) => LoraConfig(
+        name: l.name,
+        modelStrength: l.strength,
+        clipStrength: l.strength,
+      )).toList();
     }
 
-    final data = response.data!;
-    final generationId = data['generation_id'] as String?;
+    // Build the appropriate workflow based on mode
+    Map<String, dynamic> workflow;
 
-    if (data['status'] == 'generating' && generationId != null) {
-      // Start polling for progress
-      await _pollForCompletion(item.id, generationId);
-    } else if (data['status'] == 'completed' && data['images'] != null) {
-      // Synchronous completion
-      final images = (data['images'] as List).cast<String>();
-      final fullUrls = images.map((path) => '${_apiService.baseUrl}$path').toList();
-
-      _updateItemStatus(
-        item.id,
-        status: QueueStatus.completed,
-        resultImages: fullUrls,
-        resultImageUrl: fullUrls.isNotEmpty ? fullUrls.first : null,
+    if (item.params.videoMode) {
+      // Build video workflow
+      workflow = _workflowBuilder.buildVideoAuto(
+        model: modelToUse,
+        prompt: item.params.prompt,
+        negativePrompt: item.params.negativePrompt,
+        width: item.params.width,
+        height: item.params.height,
+        frames: item.params.frames,
+        fps: item.params.fps,
+        steps: item.params.steps,
+        cfg: item.params.cfgScale,
+        seed: item.params.seed,
+        initImageBase64: item.params.initImage,
+        outputFormat: item.params.videoFormat,
       );
-    } else if (data['status'] == 'error') {
-      throw Exception(data['error'] ?? 'Generation failed');
+    } else {
+      // Build image workflow
+      workflow = _workflowBuilder.buildText2Image(
+        model: modelToUse,
+        prompt: item.params.prompt,
+        negativePrompt: item.params.negativePrompt,
+        width: item.params.width,
+        height: item.params.height,
+        steps: item.params.steps,
+        cfg: item.params.cfgScale,
+        seed: item.params.seed,
+        sampler: item.params.sampler,
+        scheduler: item.params.scheduler,
+        loras: loraConfigs,
+        initImageBase64: item.params.initImage,
+        denoise: item.params.initImage != null ? item.params.initImageCreativity : 1.0,
+      );
     }
+
+    // Queue the workflow
+    final promptId = await _comfyService.queuePrompt(workflow);
+    if (promptId == null) {
+      throw Exception('Failed to queue workflow');
+    }
+
+    _currentPromptId = promptId;
+
+    // Wait for completion via progress stream
+    await _waitForCompletion(item.id, promptId);
   }
 
-  /// Poll for generation completion
-  Future<void> _pollForCompletion(String itemId, String generationId) async {
+  /// Wait for generation completion via ComfyUI progress stream
+  Future<void> _waitForCompletion(String itemId, String promptId) async {
     final completer = Completer<void>();
 
-    _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(milliseconds: 250), (timer) async {
-      try {
-        final response = await _apiService.post<Map<String, dynamic>>(
-          '/api/GetProgress',
-          data: {'prompt_id': generationId},
+    // Cancel any existing subscription
+    await _progressSubscription?.cancel();
+
+    // Listen to progress stream for this specific prompt
+    _progressSubscription = _comfyService.progressStream.listen((update) {
+      if (update.promptId != promptId) return;
+
+      // Update progress
+      if (update.totalSteps > 0) {
+        _updateItemProgress(itemId, update.progress, update.currentStep, update.totalSteps);
+      }
+
+      if (update.isComplete && update.outputImages != null && update.outputImages!.isNotEmpty) {
+        _updateItemStatus(
+          itemId,
+          status: QueueStatus.completed,
+          resultImages: update.outputImages,
+          resultImageUrl: update.outputImages!.first,
+          progress: 1.0,
         );
-
-        if (!response.isSuccess || response.data == null) return;
-
-        final data = response.data!;
-        final status = data['status'] as String?;
-
-        if (status == 'completed') {
-          timer.cancel();
-          final imagesList = data['images'] as List? ?? [];
-          final fullUrls = imagesList
-              .map((path) => '${_apiService.baseUrl}$path')
-              .cast<String>()
-              .toList();
-
-          _updateItemStatus(
-            itemId,
-            status: QueueStatus.completed,
-            resultImages: fullUrls,
-            resultImageUrl: fullUrls.isNotEmpty ? fullUrls.first : null,
-            progress: 1.0,
-          );
-
-          if (!completer.isCompleted) completer.complete();
-        } else if (status == 'error') {
-          timer.cancel();
-          _updateItemStatus(
-            itemId,
-            status: QueueStatus.failed,
-            error: data['error'] as String? ?? 'Generation failed',
-          );
-
-          if (!completer.isCompleted) {
-            completer.completeError(Exception(data['error'] ?? 'Generation failed'));
-          }
-        } else if (status == 'generating' || status == 'queued') {
-          final step = data['step'] as int? ?? 0;
-          final total = data['total'] as int? ?? 0;
-          final progress = total > 0 ? step / total : 0.0;
-
-          _updateItemProgress(itemId, progress, step, total);
+        if (!completer.isCompleted) completer.complete();
+      } else if (update.status == 'error') {
+        _updateItemStatus(
+          itemId,
+          status: QueueStatus.failed,
+          error: 'Generation failed',
+        );
+        if (!completer.isCompleted) {
+          completer.completeError(Exception('Generation failed'));
         }
-      } catch (e) {
-        // Ignore poll errors, will retry
+      } else if (update.status == 'interrupted') {
+        _updateItemStatus(
+          itemId,
+          status: QueueStatus.cancelled,
+        );
+        if (!completer.isCompleted) completer.complete();
+      }
+    });
+
+    // Also listen to error stream
+    final errorSubscription = _comfyService.errorStream.listen((error) {
+      if (error.promptId == promptId) {
+        _updateItemStatus(
+          itemId,
+          status: QueueStatus.failed,
+          error: error.message,
+        );
+        if (!completer.isCompleted) {
+          completer.completeError(Exception(error.message));
+        }
       }
     });
 
@@ -491,8 +485,10 @@ class GenerationQueueService {
     try {
       await completer.future.timeout(const Duration(minutes: 30));
     } on TimeoutException {
-      _pollTimer?.cancel();
       throw Exception('Generation timed out');
+    } finally {
+      await _progressSubscription?.cancel();
+      await errorSubscription.cancel();
     }
   }
 
@@ -536,13 +532,10 @@ class GenerationQueueService {
 
   /// Cancel the current generation
   Future<void> _cancelCurrentGeneration() async {
-    final session = _ref.read(sessionProvider);
-    _pollTimer?.cancel();
+    await _progressSubscription?.cancel();
 
     try {
-      await _apiService.post('/api/InterruptGeneration', data: {
-        'session_id': session.sessionId,
-      });
+      await _comfyService.interrupt();
     } catch (e) {
       // Ignore cancel errors
     }
@@ -577,7 +570,7 @@ class GenerationQueueService {
 
   /// Dispose resources
   void dispose() {
-    _pollTimer?.cancel();
+    _progressSubscription?.cancel();
     _queueController.close();
     _processingController.close();
   }

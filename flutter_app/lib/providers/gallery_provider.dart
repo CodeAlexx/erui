@@ -1,13 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
-import 'session_provider.dart';
+import '../services/comfyui_service.dart';
 
 /// Gallery state provider
 final galleryProvider =
     StateNotifierProvider<GalleryNotifier, GalleryState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  final session = ref.watch(sessionProvider);
-  return GalleryNotifier(apiService, session);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return GalleryNotifier(comfyService);
 });
 
 /// Gallery state
@@ -128,6 +126,67 @@ class GalleryImage {
     );
   }
 
+  /// Create GalleryImage from ComfyUI history entry
+  factory GalleryImage.fromComfyHistory(String promptId, Map<String, dynamic> historyEntry, ComfyUIService comfyService) {
+    // Extract outputs from history entry
+    final outputs = historyEntry['outputs'] as Map<String, dynamic>?;
+    final prompt = historyEntry['prompt'] as List?;
+
+    String? imageUrl;
+    String filename = '';
+    String subfolder = '';
+
+    // Find first image in outputs
+    if (outputs != null) {
+      for (final nodeOutput in outputs.values) {
+        if (nodeOutput is Map<String, dynamic>) {
+          final images = nodeOutput['images'] as List?;
+          if (images != null && images.isNotEmpty) {
+            final img = images.first as Map<String, dynamic>;
+            filename = img['filename'] as String? ?? '';
+            subfolder = img['subfolder'] as String? ?? '';
+            final type = img['type'] as String? ?? 'output';
+            imageUrl = comfyService.getImageUrl(filename, subfolder: subfolder, type: type);
+            break;
+          }
+        }
+      }
+    }
+
+    // Try to extract prompt text from workflow
+    String? promptText;
+    if (prompt != null && prompt.isNotEmpty) {
+      // prompt[0] is the workflow nodes
+      final nodes = prompt[0] as Map<String, dynamic>?;
+      if (nodes != null) {
+        for (final node in nodes.values) {
+          if (node is Map<String, dynamic>) {
+            final classType = node['class_type'] as String?;
+            if (classType == 'CLIPTextEncode') {
+              final inputs = node['inputs'] as Map<String, dynamic>?;
+              promptText ??= inputs?['text'] as String?;
+            }
+          }
+        }
+      }
+    }
+
+    return GalleryImage(
+      id: promptId,
+      filename: filename,
+      path: '$subfolder/$filename',
+      url: imageUrl ?? '',
+      thumbnailUrl: imageUrl,
+      width: 0, // ComfyUI history doesn't include dimensions
+      height: 0,
+      size: 0,
+      createdAt: DateTime.now(), // ComfyUI history doesn't include timestamp
+      prompt: promptText,
+      negativePrompt: null,
+      metadata: historyEntry,
+    );
+  }
+
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -158,13 +217,12 @@ class GalleryImage {
 
 /// Gallery notifier
 class GalleryNotifier extends StateNotifier<GalleryState> {
-  final ApiService _apiService;
-  final SessionState _session;
+  final ComfyUIService _comfyService;
 
-  GalleryNotifier(this._apiService, this._session)
+  GalleryNotifier(this._comfyService)
       : super(const GalleryState());
 
-  /// Load images from folder (ERI history)
+  /// Load images from ComfyUI history
   Future<void> loadImages({String? folder, bool refresh = false}) async {
     if (refresh) {
       state = state.copyWith(
@@ -177,40 +235,48 @@ class GalleryNotifier extends StateNotifier<GalleryState> {
       state = state.copyWith(isLoading: true, error: null);
     }
 
-    final targetFolder = folder ?? state.currentFolder;
-
     try {
-      // Use ListHistory endpoint which scans ERI output folder
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/ListHistory',
-        data: {
-          'path': targetFolder,
-          'max': state.pageSize * (state.currentPage + 1),
-          'depth': 5,
-        },
-      );
+      // Use ComfyUI history endpoint
+      final history = await _comfyService.getAllHistory(maxItems: state.pageSize * (state.currentPage + 1));
 
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        final files = (data['files'] as List<dynamic>?)
-                ?.map((f) => GalleryImage.fromJson(f as Map<String, dynamic>))
-                .toList() ??
-            [];
+      if (history != null) {
+        final images = <GalleryImage>[];
+
+        for (final entry in history.entries) {
+          final promptId = entry.key;
+          final historyEntry = entry.value as Map<String, dynamic>;
+
+          // Skip entries without outputs
+          final outputs = historyEntry['outputs'] as Map<String, dynamic>?;
+          if (outputs == null || outputs.isEmpty) continue;
+
+          // Check if any output has images
+          bool hasImages = false;
+          for (final nodeOutput in outputs.values) {
+            if (nodeOutput is Map<String, dynamic>) {
+              final nodeImages = nodeOutput['images'] as List?;
+              if (nodeImages != null && nodeImages.isNotEmpty) {
+                hasImages = true;
+                break;
+              }
+            }
+          }
+
+          if (hasImages) {
+            images.add(GalleryImage.fromComfyHistory(promptId, historyEntry, _comfyService));
+          }
+        }
 
         state = state.copyWith(
-          images: files,
-          folders: (data['folders'] as List<dynamic>?)
-                  ?.map((f) => f as String)
-                  .toList() ??
-              [],
-          currentFolder: targetFolder,
-          totalCount: files.length,
+          images: images,
+          folders: [], // ComfyUI doesn't have folder structure in history
+          totalCount: images.length,
           isLoading: false,
         );
       } else {
         state = state.copyWith(
           isLoading: false,
-          error: response.error ?? 'Failed to load images',
+          error: 'Failed to load history from ComfyUI',
         );
       }
     } catch (e) {
@@ -234,68 +300,82 @@ class GalleryNotifier extends StateNotifier<GalleryState> {
     await loadImages(refresh: true);
   }
 
-  /// Navigate to folder
+  /// Navigate to folder (not applicable for ComfyUI history)
   Future<void> navigateToFolder(String folder) async {
-    state = state.copyWith(
-      currentFolder: folder,
-      images: [],
-      currentPage: 0,
-    );
-    await loadImages();
+    // ComfyUI history doesn't support folder navigation
+    // This is a no-op but kept for API compatibility
   }
 
-  /// Delete image by path
+  /// Delete image by prompt ID (clears from ComfyUI history)
   Future<bool> deleteImage(String path) async {
     try {
-      final response = await _apiService.post('/api/DeleteImage', data: {
-        'path': path,
-      });
+      // For ComfyUI, we delete from history by prompt ID
+      // The path might be the prompt ID
+      await _comfyService.deleteHistory(promptIds: [path]);
 
-      if (response.isSuccess) {
-        state = state.copyWith(
-          images: state.images.where((img) => img.path != path).toList(),
-          totalCount: state.totalCount - 1,
-        );
-        return true;
-      }
-      return false;
+      state = state.copyWith(
+        images: state.images.where((img) => img.id != path && img.path != path).toList(),
+        totalCount: state.totalCount - 1,
+      );
+      return true;
     } catch (e) {
       return false;
     }
   }
 
-  /// Search images by prompt
+  /// Search images by prompt (client-side filtering for ComfyUI)
   Future<void> search(String query) async {
-    state = state.copyWith(isLoading: true, error: null, images: []);
+    state = state.copyWith(isLoading: true, error: null);
 
     try {
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/SearchImages',
-        data: {
-          'session_id': _session.sessionId,
-          'query': query,
-          'page': 0,
-          'page_size': state.pageSize,
-        },
-      );
+      // Load all history first
+      final history = await _comfyService.getAllHistory(maxItems: 200);
 
-      if (response.isSuccess && response.data != null) {
-        final data = response.data!;
-        final files = (data['files'] as List<dynamic>?)
-                ?.map((f) => GalleryImage.fromJson(f as Map<String, dynamic>))
-                .toList() ??
-            [];
+      if (history != null) {
+        final images = <GalleryImage>[];
+        final lowerQuery = query.toLowerCase();
+
+        for (final entry in history.entries) {
+          final promptId = entry.key;
+          final historyEntry = entry.value as Map<String, dynamic>;
+
+          // Skip entries without outputs
+          final outputs = historyEntry['outputs'] as Map<String, dynamic>?;
+          if (outputs == null || outputs.isEmpty) continue;
+
+          // Check if any output has images
+          bool hasImages = false;
+          for (final nodeOutput in outputs.values) {
+            if (nodeOutput is Map<String, dynamic>) {
+              final nodeImages = nodeOutput['images'] as List?;
+              if (nodeImages != null && nodeImages.isNotEmpty) {
+                hasImages = true;
+                break;
+              }
+            }
+          }
+
+          if (!hasImages) continue;
+
+          final galleryImage = GalleryImage.fromComfyHistory(promptId, historyEntry, _comfyService);
+
+          // Search in prompt text
+          if (galleryImage.prompt?.toLowerCase().contains(lowerQuery) == true ||
+              galleryImage.filename.toLowerCase().contains(lowerQuery)) {
+            images.add(galleryImage);
+          }
+        }
 
         state = state.copyWith(
-          images: files,
-          totalCount: data['total_count'] as int? ?? files.length,
+          images: images,
+          totalCount: images.length,
           currentPage: 0,
           isLoading: false,
         );
       } else {
         state = state.copyWith(
           isLoading: false,
-          error: response.error ?? 'Search failed',
+          error: 'Search failed',
         );
       }
     } catch (e) {

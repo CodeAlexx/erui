@@ -1,33 +1,54 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 
-/// LoRA/LyCORIS list provider - fetches from EriUI backend
+/// LoRA/LyCORIS list provider - fetches from ComfyUI backend
 final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
-  final apiService = ref.watch(apiServiceProvider);
+  final comfyService = ref.watch(comfyUIServiceProvider);
   final allModels = <LoraModel>[];
 
-  // Fetch LoRAs from EriUI backend
-  final loraResponse = await apiService.post<Map<String, dynamic>>(
-    '/API/ListModels',
-    data: {'type': 'LoRA', 'depth': 3},
-  );
-  if (loraResponse.isSuccess && loraResponse.data != null) {
-    final models = loraResponse.data!['models'] as List? ?? [];
-    allModels.addAll(models.map((m) => LoraModel.fromJson(m as Map<String, dynamic>, type: 'LoRA')));
-  }
+  // Fetch LoRAs from ComfyUI backend
+  final loraNames = await comfyService.getLoras();
 
-  // Fetch LyCORIS from EriUI backend
-  final lycorisResponse = await apiService.post<Map<String, dynamic>>(
-    '/API/ListModels',
-    data: {'type': 'LyCORIS', 'depth': 3},
-  );
-  if (lycorisResponse.isSuccess && lycorisResponse.data != null) {
-    final models = lycorisResponse.data!['models'] as List? ?? [];
-    allModels.addAll(models.map((m) => LoraModel.fromJson(m as Map<String, dynamic>, type: 'LyCORIS')));
+  for (final name in loraNames) {
+    // Detect type from filename
+    final lowerName = name.toLowerCase();
+    final type = (lowerName.contains('locon') ||
+        lowerName.contains('loha') ||
+        lowerName.contains('lokr') ||
+        lowerName.contains('lycoris')) ? 'LyCORIS' : 'LoRA';
+
+    allModels.add(LoraModel(
+      name: name,
+      path: name,
+      title: _formatLoraTitle(name),
+      previewImage: null, // ComfyUI doesn't provide preview images for LoRAs
+      type: type,
+      description: null,
+      baseModel: null,
+    ));
   }
 
   return allModels;
 });
+
+/// Format LoRA name for display
+String _formatLoraTitle(String name) {
+  // Remove file extension
+  String title = name;
+  if (title.endsWith('.safetensors')) {
+    title = title.substring(0, title.length - 12);
+  } else if (title.endsWith('.ckpt')) {
+    title = title.substring(0, title.length - 5);
+  } else if (title.endsWith('.pt')) {
+    title = title.substring(0, title.length - 3);
+  }
+
+  // Remove path separators and get just the filename
+  final parts = title.split(RegExp(r'[/\\]'));
+  title = parts.last;
+
+  return title;
+}
 
 /// LoRA filter text provider
 final loraFilterProvider = StateProvider<String>((ref) => '');

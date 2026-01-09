@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/workflow_models.dart';
-import '../../../services/api_service.dart';
+import '../../../services/comfyui_service.dart';
 import '../../../services/storage_service.dart';
 
 /// Workflow editor state
@@ -64,10 +64,10 @@ class WorkflowEditorState {
 
 /// Workflow editor notifier
 class WorkflowEditorNotifier extends StateNotifier<WorkflowEditorState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
   final StorageService _storageService;
 
-  WorkflowEditorNotifier(this._apiService, this._storageService)
+  WorkflowEditorNotifier(this._comfyService, this._storageService)
       : super(const WorkflowEditorState()) {
     // Initialize node definitions
     NodeDefinitions.registerDefaults();
@@ -455,17 +455,15 @@ class WorkflowEditorNotifier extends StateNotifier<WorkflowEditorState> {
     try {
       final comfyWorkflow = state.workflow!.toComfyUI();
 
-      // Queue on backend
-      final response = await _apiService.post('/api/GenerateText2Image', data: {
-        'workflow': comfyWorkflow,
-      });
+      // Queue on ComfyUI backend
+      final promptId = await _comfyService.queuePrompt(comfyWorkflow);
 
-      if (!response.isSuccess) {
-        throw Exception(response.error ?? 'Unknown error');
+      if (promptId == null) {
+        throw Exception('Failed to queue workflow');
       }
 
-      // Start polling for progress
-      // In a real implementation, this would use WebSocket
+      // Progress updates are handled via WebSocket in ComfyUI service
+      // Wait for completion or handle via stream subscription
       state = state.copyWith(isExecuting: false);
     } catch (e) {
       state = state.copyWith(
@@ -478,7 +476,7 @@ class WorkflowEditorNotifier extends StateNotifier<WorkflowEditorState> {
   /// Cancel execution
   Future<void> cancelExecution() async {
     try {
-      await _apiService.post('/api/InterruptGeneration', data: {});
+      await _comfyService.interrupt();
       state = state.copyWith(isExecuting: false);
     } catch (e) {
       // Ignore
@@ -495,7 +493,7 @@ class WorkflowEditorNotifier extends StateNotifier<WorkflowEditorState> {
 
 /// Provider for workflow editor
 final workflowEditorProvider = StateNotifierProvider<WorkflowEditorNotifier, WorkflowEditorState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
+  final comfyService = ref.watch(comfyUIServiceProvider);
   final storageService = ref.watch(storageServiceProvider);
-  return WorkflowEditorNotifier(apiService, storageService);
+  return WorkflowEditorNotifier(comfyService, storageService);
 });

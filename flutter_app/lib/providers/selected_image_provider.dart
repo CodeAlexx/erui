@@ -1,11 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/api_service.dart';
+import '../services/comfyui_service.dart';
 import 'gallery_provider.dart';
 
 /// Selected image provider - tracks currently selected image for metadata display
 final selectedImageProvider = StateNotifierProvider<SelectedImageNotifier, SelectedImageState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return SelectedImageNotifier(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return SelectedImageNotifier(comfyService);
 });
 
 /// Selected image state
@@ -48,7 +48,7 @@ class SelectedImageState {
   }
 }
 
-/// Image metadata - parsed from SwarmUI format
+/// Image metadata - parsed from ComfyUI workflow format
 class ImageMetadata {
   final String? prompt;
   final String? negativePrompt;
@@ -92,6 +92,117 @@ class ImageMetadata {
     this.raw,
   });
 
+  /// Parse metadata from ComfyUI history entry
+  factory ImageMetadata.fromComfyHistory(Map<String, dynamic> historyEntry) {
+    final promptList = historyEntry['prompt'] as List?;
+    if (promptList == null || promptList.isEmpty) {
+      return ImageMetadata(raw: historyEntry);
+    }
+
+    // prompt[0] is the workflow nodes
+    final nodes = promptList[0] as Map<String, dynamic>?;
+    if (nodes == null) {
+      return ImageMetadata(raw: historyEntry);
+    }
+
+    String? prompt;
+    String? negativePrompt;
+    String? model;
+    int? width;
+    int? height;
+    int? seed;
+    int? steps;
+    double? cfgScale;
+    String? sampler;
+    String? scheduler;
+    String? vae;
+    List<LoraInfo>? loras;
+
+    // Extract information from workflow nodes
+    for (final node in nodes.values) {
+      if (node is! Map<String, dynamic>) continue;
+
+      final classType = node['class_type'] as String?;
+      final inputs = node['inputs'] as Map<String, dynamic>?;
+      if (classType == null || inputs == null) continue;
+
+      switch (classType) {
+        case 'CLIPTextEncode':
+          // Try to identify positive vs negative prompt
+          final text = inputs['text'] as String?;
+          if (text != null) {
+            // First CLIPTextEncode is usually positive prompt
+            if (prompt == null) {
+              prompt = text;
+            } else if (negativePrompt == null) {
+              negativePrompt = text;
+            }
+          }
+          break;
+
+        case 'CheckpointLoaderSimple':
+        case 'CheckpointLoader':
+          model = inputs['ckpt_name'] as String?;
+          break;
+
+        case 'KSampler':
+        case 'KSamplerAdvanced':
+          seed = inputs['seed'] as int?;
+          steps = inputs['steps'] as int?;
+          cfgScale = (inputs['cfg'] as num?)?.toDouble();
+          sampler = inputs['sampler_name'] as String?;
+          scheduler = inputs['scheduler'] as String?;
+          break;
+
+        case 'EmptyLatentImage':
+          width = inputs['width'] as int?;
+          height = inputs['height'] as int?;
+          break;
+
+        case 'VAELoader':
+          vae = inputs['vae_name'] as String?;
+          break;
+
+        case 'LoraLoader':
+        case 'LoraLoaderModelOnly':
+          final loraName = inputs['lora_name'] as String?;
+          final strength = (inputs['strength_model'] as num?)?.toDouble() ?? 1.0;
+          if (loraName != null) {
+            loras ??= [];
+            loras.add(LoraInfo(name: loraName, weight: strength));
+          }
+          break;
+      }
+    }
+
+    String? resolution;
+    if (width != null && height != null) {
+      // Calculate aspect ratio
+      final gcd = _gcd(width, height);
+      final aspectW = width ~/ gcd;
+      final aspectH = height ~/ gcd;
+      resolution = '$aspectW:$aspectH (${width}x$height)';
+    }
+
+    return ImageMetadata(
+      prompt: prompt,
+      negativePrompt: negativePrompt,
+      model: model,
+      resolution: resolution,
+      width: width,
+      height: height,
+      seed: seed,
+      steps: steps,
+      cfgScale: cfgScale,
+      sampler: sampler,
+      scheduler: scheduler,
+      vae: vae,
+      loras: loras,
+      raw: historyEntry,
+    );
+  }
+
+  /// Parse metadata from SwarmUI format (for compatibility)
   factory ImageMetadata.fromSwarmJson(Map<String, dynamic> json) {
     final suiParams = json['sui_image_params'] as Map<String, dynamic>? ?? json;
     final suiExtra = json['sui_extra_data'] as Map<String, dynamic>?;
@@ -121,7 +232,7 @@ class ImageMetadata {
       final gcd = _gcd(width, height);
       final aspectW = width ~/ gcd;
       final aspectH = height ~/ gcd;
-      resolution = '${aspectW}:$aspectH (${width}x$height)';
+      resolution = '$aspectW:$aspectH (${width}x$height)';
     }
 
     return ImageMetadata(
@@ -172,9 +283,9 @@ class LoraInfo {
 
 /// Selected image notifier
 class SelectedImageNotifier extends StateNotifier<SelectedImageState> {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
-  SelectedImageNotifier(this._apiService) : super(const SelectedImageState());
+  SelectedImageNotifier(this._comfyService) : super(const SelectedImageState());
 
   /// Select an image by URL (for current session images)
   Future<void> selectImageUrl(String url) async {
@@ -182,11 +293,12 @@ class SelectedImageNotifier extends StateNotifier<SelectedImageState> {
     await _fetchMetadata(url);
   }
 
-  /// Select a gallery image (already has metadata)
+  /// Select a gallery image (already has metadata from ComfyUI history)
   void selectGalleryImage(GalleryImage image) {
     ImageMetadata? metadata;
     if (image.metadata != null) {
-      metadata = ImageMetadata.fromSwarmJson(image.metadata!);
+      // Parse metadata from ComfyUI history format
+      metadata = ImageMetadata.fromComfyHistory(image.metadata!);
     }
     state = SelectedImageState(
       galleryImage: image,
@@ -195,24 +307,23 @@ class SelectedImageNotifier extends StateNotifier<SelectedImageState> {
     );
   }
 
-  /// Fetch metadata for an image URL
+  /// Fetch metadata for an image URL from ComfyUI history
   Future<void> _fetchMetadata(String url) async {
     try {
-      // Extract path from URL to fetch metadata
+      // Try to extract prompt ID from URL to fetch history
+      // ComfyUI image URLs look like: http://host:port/view?filename=...&subfolder=...&type=output
       final uri = Uri.parse(url);
-      final path = uri.path;
+      final filename = uri.queryParameters['filename'];
 
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/GetImageMetadata',
-        data: {'path': path},
-      );
-
-      if (response.isSuccess && response.data != null) {
-        final metadata = ImageMetadata.fromSwarmJson(response.data!);
-        state = state.copyWith(metadata: metadata, isLoading: false);
-      } else {
+      if (filename == null) {
         state = state.copyWith(isLoading: false, error: 'No metadata available');
+        return;
       }
+
+      // ComfyUI doesn't have a direct way to get metadata by filename
+      // We would need to search through history, which is expensive
+      // For now, just indicate no metadata available
+      state = state.copyWith(isLoading: false, error: 'Metadata lookup not available');
     } catch (e) {
       state = state.copyWith(isLoading: false, error: e.toString());
     }

@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/generation_provider.dart';
 import '../../providers/models_provider.dart';
-import '../../providers/session_provider.dart';
-import '../../services/api_service.dart';
+import '../../services/comfyui_service.dart';
+import '../../services/comfyui_workflow_builder.dart';
 import '../../widgets/image_viewer_dialog.dart';
 
 /// Model Comparison Screen
@@ -913,9 +913,8 @@ class _ResultCard extends StatelessWidget {
 /// Model comparison state provider
 final modelComparisonProvider =
     StateNotifierProvider<ModelComparisonNotifier, ModelComparisonState>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  final session = ref.watch(sessionProvider);
-  return ModelComparisonNotifier(apiService, session);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return ModelComparisonNotifier(comfyService);
 });
 
 /// Status of a comparison result
@@ -1018,12 +1017,13 @@ class ModelComparisonState {
 
 /// Model comparison state notifier
 class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
-  final ApiService _apiService;
-  final SessionState _session;
+  final ComfyUIService _comfyService;
   bool _shouldCancel = false;
-  String? _currentGenerationId;
+  String? _currentPromptId;
+  StreamSubscription<ComfyProgressUpdate>? _progressSubscription;
+  GenerationParams? _baseParams;
 
-  ModelComparisonNotifier(this._apiService, this._session)
+  ModelComparisonNotifier(this._comfyService)
       : super(const ModelComparisonState());
 
   /// Add a model to comparison
@@ -1055,8 +1055,8 @@ class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
 
   /// Start the comparison
   Future<void> startComparison(GenerationParams baseParams) async {
-    if (_session.sessionId == null) {
-      state = state.copyWith(error: 'Not connected');
+    if (_comfyService.currentConnectionState != ComfyConnectionState.connected) {
+      state = state.copyWith(error: 'Not connected to ComfyUI');
       return;
     }
 
@@ -1066,6 +1066,7 @@ class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
     }
 
     _shouldCancel = false;
+    _baseParams = baseParams;
 
     // Generate seed if needed
     int seed = state.seed;
@@ -1153,106 +1154,113 @@ class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
     }
   }
 
-  /// Generate a single image
+  /// Generate a single image using ComfyUI
   Future<String?> _generateSingle(
       GenerationParams baseParams, String modelName) async {
     try {
-      final apiParams = <String, dynamic>{
-        'session_id': _session.sessionId,
-        'prompt': baseParams.prompt,
-        'negativeprompt': baseParams.negativePrompt,
-        'model': modelName,
-        'width': baseParams.width,
-        'height': baseParams.height,
-        'steps': baseParams.steps,
-        'cfgscale': baseParams.cfgScale,
-        'seed': state.useSameSeed ? state.seed : baseParams.seed,
-        'sampler': baseParams.sampler,
-        'scheduler': baseParams.scheduler,
-        'images': 1,
-      };
-
-      final response = await _apiService.post<Map<String, dynamic>>(
-        '/api/GenerateText2ImageWS',
-        data: apiParams,
+      // Build ComfyUI workflow
+      final builder = ComfyUIWorkflowBuilder();
+      final workflow = builder.buildText2Image(
+        model: modelName,
+        prompt: baseParams.prompt,
+        negativePrompt: baseParams.negativePrompt,
+        width: baseParams.width,
+        height: baseParams.height,
+        steps: baseParams.steps,
+        cfg: baseParams.cfgScale,
+        seed: state.useSameSeed ? state.seed : baseParams.seed,
+        sampler: baseParams.sampler,
+        scheduler: baseParams.scheduler,
+        filenamePrefix: 'compare',
       );
 
-      if (!response.isSuccess || response.data == null) {
+      // Queue the prompt
+      final promptId = await _comfyService.queuePrompt(workflow);
+      if (promptId == null) {
         return null;
       }
 
-      final data = response.data!;
-      final generationId = data['generation_id'] as String?;
+      _currentPromptId = promptId;
 
-      // Handle async generation
-      if (data['status'] == 'generating' && generationId != null) {
-        _currentGenerationId = generationId;
-        return await _pollForResult(generationId);
-      }
-
-      // Handle sync completion
-      if (data['status'] == 'completed' && data['images'] != null) {
-        final images = (data['images'] as List).cast<String>();
-        if (images.isNotEmpty) {
-          return '${_apiService.baseUrl}${images.first}';
-        }
-      }
-
-      return null;
+      // Wait for completion
+      return await _waitForCompletion(promptId);
     } catch (e) {
       return null;
     }
   }
 
-  /// Poll for generation result
-  Future<String?> _pollForResult(String generationId) async {
+  /// Wait for ComfyUI generation to complete
+  Future<String?> _waitForCompletion(String promptId) async {
     final completer = Completer<String?>();
-    const pollInterval = Duration(milliseconds: 500);
-    const maxPolls = 600; // 5 minutes max
-    int pollCount = 0;
 
-    Timer.periodic(pollInterval, (timer) async {
-      if (_shouldCancel || pollCount >= maxPolls) {
-        timer.cancel();
+    // Listen to progress stream for completion
+    _progressSubscription?.cancel();
+    _progressSubscription = _comfyService.progressStream.listen((update) {
+      if (update.promptId == promptId) {
+        if (update.isComplete) {
+          _progressSubscription?.cancel();
+          if (update.outputImages != null && update.outputImages!.isNotEmpty) {
+            if (!completer.isCompleted) {
+              completer.complete(update.outputImages!.first);
+            }
+          } else {
+            // Try to get images from history
+            _getImagesFromHistory(promptId).then((images) {
+              if (!completer.isCompleted) {
+                completer.complete(images.isNotEmpty ? images.first : null);
+              }
+            });
+          }
+        } else if (update.status == 'error') {
+          _progressSubscription?.cancel();
+          if (!completer.isCompleted) {
+            completer.complete(null);
+          }
+        }
+      }
+    });
+
+    // Also listen for errors
+    final errorSubscription = _comfyService.errorStream.listen((error) {
+      if (error.promptId == promptId) {
+        _progressSubscription?.cancel();
         if (!completer.isCompleted) {
           completer.complete(null);
         }
-        return;
       }
+    });
 
-      pollCount++;
+    // Timeout after 5 minutes
+    Future.delayed(const Duration(minutes: 5), () {
+      if (!completer.isCompleted) {
+        _progressSubscription?.cancel();
+        errorSubscription.cancel();
+        completer.complete(null);
+      }
+    });
 
-      try {
-        final response = await _apiService.post<Map<String, dynamic>>(
-          '/api/GetProgress',
-          data: {'prompt_id': generationId},
-        );
-
-        if (response.isSuccess && response.data != null) {
-          final data = response.data!;
-          final status = data['status'] as String?;
-
-          if (status == 'completed') {
-            timer.cancel();
-            final images = data['images'] as List? ?? [];
-            if (images.isNotEmpty && !completer.isCompleted) {
-              completer.complete('${_apiService.baseUrl}${images.first}');
-            } else if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          } else if (status == 'error') {
-            timer.cancel();
-            if (!completer.isCompleted) {
-              completer.complete(null);
-            }
-          }
+    // Also check if cancelled
+    Timer.periodic(const Duration(milliseconds: 500), (timer) {
+      if (_shouldCancel) {
+        timer.cancel();
+        _progressSubscription?.cancel();
+        errorSubscription.cancel();
+        if (!completer.isCompleted) {
+          completer.complete(null);
         }
-      } catch (e) {
-        // Continue polling on error
+      }
+      if (completer.isCompleted) {
+        timer.cancel();
+        errorSubscription.cancel();
       }
     });
 
     return completer.future;
+  }
+
+  /// Get images from ComfyUI history
+  Future<List<String>> _getImagesFromHistory(String promptId) async {
+    return await _comfyService.getOutputImages(promptId);
   }
 
   /// Update result status
@@ -1277,27 +1285,22 @@ class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
 
   /// Resume comparison
   Future<void> resume() async {
-    if (!state.isPaused) return;
+    if (!state.isPaused || _baseParams == null) return;
 
     state = state.copyWith(isPaused: false, isGenerating: true);
-    // Note: We'd need to pass baseParams here - for simplicity,
-    // we'd need to store it in state or handle differently
+    await _processQueue(_baseParams!);
   }
 
   /// Cancel comparison
   Future<void> cancel() async {
     _shouldCancel = true;
+    _progressSubscription?.cancel();
 
-    // Try to cancel current generation
-    if (_currentGenerationId != null) {
-      try {
-        await _apiService.post('/api/InterruptGeneration', data: {
-          'session_id': _session.sessionId,
-          'generation_id': _currentGenerationId,
-        });
-      } catch (_) {
-        // Ignore cancel errors
-      }
+    // Try to cancel current generation via ComfyUI
+    try {
+      await _comfyService.interrupt();
+    } catch (_) {
+      // Ignore cancel errors
     }
 
     // Mark remaining as cancelled
@@ -1319,7 +1322,9 @@ class ModelComparisonNotifier extends StateNotifier<ModelComparisonState> {
   /// Reset state
   void reset() {
     _shouldCancel = false;
-    _currentGenerationId = null;
+    _currentPromptId = null;
+    _baseParams = null;
+    _progressSubscription?.cancel();
     state = const ModelComparisonState();
   }
 }

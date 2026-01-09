@@ -6,12 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
-import 'api_service.dart';
+import 'comfyui_service.dart';
 
 /// Autocomplete service provider
 final autocompleteServiceProvider = Provider<AutocompleteService>((ref) {
-  final apiService = ref.watch(apiServiceProvider);
-  return AutocompleteService(apiService);
+  final comfyService = ref.watch(comfyUIServiceProvider);
+  return AutocompleteService(comfyService);
 });
 
 /// Tag category enum matching danbooru/e621 conventions
@@ -112,7 +112,7 @@ class _TrieNode {
 /// Autocomplete service for prompt field
 /// Handles tag files, model names, LoRA names, and syntax completions
 class AutocompleteService {
-  final ApiService _apiService;
+  final ComfyUIService _comfyService;
 
   /// All loaded tags
   final List<TagSuggestion> _tags = [];
@@ -149,7 +149,7 @@ class AutocompleteService {
   bool _tagsLoaded = false;
   bool get tagsLoaded => _tagsLoaded;
 
-  AutocompleteService(this._apiService);
+  AutocompleteService(this._comfyService);
 
   /// Initialize the service and load tag files
   Future<void> initialize() async {
@@ -262,45 +262,36 @@ class AutocompleteService {
   Future<void> _refreshModelCompletions() async {
     try {
       // Fetch checkpoints from ComfyUI
-      final modelsResponse = await _apiService.get<List<dynamic>>('/models/checkpoints');
-
-      if (modelsResponse.isSuccess && modelsResponse.data != null) {
-        _modelCompletions.clear();
-        _modelCompletions.addAll(
-          modelsResponse.data!.map((name) => TagSuggestion.forModel(
-                name as String,
-                TagCategory.model,
-              )),
-        );
-      }
+      final checkpoints = await _comfyService.getCheckpoints();
+      _modelCompletions.clear();
+      _modelCompletions.addAll(
+        checkpoints.map((name) => TagSuggestion.forModel(
+              name,
+              TagCategory.model,
+            )),
+      );
 
       // Fetch LoRAs from ComfyUI
-      final loraResponse = await _apiService.get<List<dynamic>>('/models/loras');
-
-      if (loraResponse.isSuccess && loraResponse.data != null) {
-        _loraCompletions.clear();
-        _loraCompletions.addAll(
-          loraResponse.data!.map((name) => TagSuggestion.forModel(
-                name as String,
-                TagCategory.lora,
-              )),
-        );
-      }
+      final loras = await _comfyService.getLoras();
+      _loraCompletions.clear();
+      _loraCompletions.addAll(
+        loras.map((name) => TagSuggestion.forModel(
+              name,
+              TagCategory.lora,
+            )),
+      );
 
       // Fetch Embeddings from ComfyUI
-      final embeddingResponse = await _apiService.get<List<dynamic>>('/models/embeddings');
-
-      if (embeddingResponse.isSuccess && embeddingResponse.data != null) {
-        _embeddingCompletions.clear();
-        _embeddingCompletions.addAll(
-          embeddingResponse.data!.map((name) => TagSuggestion.forModel(
-                name as String,
-                TagCategory.embedding,
-              )),
-        );
-      }
+      final embeddings = await _comfyService.getEmbeddings();
+      _embeddingCompletions.clear();
+      _embeddingCompletions.addAll(
+        embeddings.map((name) => TagSuggestion.forModel(
+              name,
+              TagCategory.embedding,
+            )),
+      );
     } catch (_) {
-      // API not available
+      // ComfyUI API not available
     }
   }
 
