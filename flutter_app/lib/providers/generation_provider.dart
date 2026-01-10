@@ -267,8 +267,8 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
 
     // Choose workflow type based on parameters
     if (params.videoMode) {
-      // Video generation workflow
-      return builder.buildVideo(
+      // Video generation workflow - auto-detect model type
+      return builder.buildVideoAuto(
         model: modelToUse,
         prompt: params.prompt,
         negativePrompt: params.negativePrompt,
@@ -279,13 +279,12 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
         steps: params.steps,
         cfg: params.cfgScale,
         seed: params.seed,
-        sampler: params.sampler,
-        scheduler: params.scheduler,
-        vae: params.vae,
         initImageBase64: params.initImage,
-        denoise: params.initImage != null ? params.initImageCreativity : 1.0,
-        filenamePrefix: 'ERI_video',
-        outputFormat: params.videoFormat == 'mp4' ? 'video/h264-mp4' : 'image/gif',
+        highNoiseModel: params.highNoiseModel,
+        lowNoiseModel: params.lowNoiseModel,
+        videoAugmentationLevel: params.videoAugmentationLevel,
+        outputFormat: params.videoFormat,
+        loras: loraConfigs,
       );
     } else if (params.refinerModel != null &&
                params.refinerModel != 'None' &&

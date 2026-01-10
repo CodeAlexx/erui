@@ -1228,8 +1228,8 @@ class ComfyUIWorkflowBuilder {
 
   /// Build an LTX Video workflow
   ///
-  /// LTX-Video uses specialized nodes for video generation with support for
-  /// both text-to-video (T2V) and image-to-video (I2V) modes.
+  /// Based exactly on the reference ltx2.json workflow structure.
+  /// Uses LTXVGemmaCLIPModelLoader, LTXVScheduler, SamplerCustomAdvanced, etc.
   Map<String, dynamic> buildLTXVideo({
     required String model,
     required String prompt,
@@ -1237,107 +1237,141 @@ class ComfyUIWorkflowBuilder {
     int width = 768,
     int height = 512,
     int frames = 97,
-    int steps = 25,
+    int steps = 20,
     double cfg = 3.0,
     int seed = -1,
     int fps = 24,
     String? initImageBase64,
     double videoAugmentationLevel = 0.15,
     String filenamePrefix = 'ERI_ltx_video',
-    String outputFormat = 'video/webp',
+    String outputFormat = 'video/h264-mp4',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // Try to use LTXVLoader if available, fall back to CheckpointLoaderSimple
-    // LTX models typically use a specialized loader
-    _modelNode = _addNode('CheckpointLoaderSimple', {
+    // Node 1: Load checkpoint
+    final checkpointNode = _addNode('CheckpointLoaderSimple', {
       'ckpt_name': model,
     });
-    _clipNode = _modelNode;
-    _clipOutput = 1;
-    _vaeNode = _modelNode;
+    _modelNode = checkpointNode;
+    _modelOutput = 0;
+    _vaeNode = checkpointNode;
     _vaeOutput = 2;
 
-    // Encode prompts using standard CLIP encoding
-    // LTX may use LTXVConditioning but falls back to standard encoding
-    _positiveNode = _addNode('CLIPTextEncode', {
-      'text': prompt,
-      'clip': _nodeRef(_clipNode, _clipOutput),
+    // Node 2: LTXVGemmaCLIPModelLoader - loads Gemma 3 text encoder
+    final clipNode = _addNode('LTXVGemmaCLIPModelLoader', {
+      'gemma_path': 'gemma_combined/model/model.safetensors',
+      'ltxv_path': model,
+      'max_length': 1024,
     });
 
-    _negativeNode = _addNode('CLIPTextEncode', {
-      'text': negativePrompt,
-      'clip': _nodeRef(_clipNode, _clipOutput),
-    });
-
-    // Create latent based on mode (T2V or I2V)
-    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
-      // Image-to-video mode
-      final loadImageNode = _addNode('LoadImageBase64', {
-        'image': initImageBase64,
-      });
-
-      // Resize image to target dimensions
-      final resizeNode = _addNode('ImageResize', {
-        'image': _nodeRef(loadImageNode, 0),
-        'width': width,
-        'height': height,
-        'interpolation': 'bicubic',
-        'method': 'fill / crop',
-        'condition': 'always',
-      });
-
-      // Encode image to latent
-      final encodedLatent = _addNode('VAEEncode', {
-        'pixels': _nodeRef(resizeNode, 0),
-        'vae': _nodeRef(_vaeNode, _vaeOutput),
-      });
-
-      // For LTX I2V, we need to expand the latent to video frames
-      // Try EmptyLTXVLatentVideo first, fall back to RepeatLatentBatch
-      _latentNode = _addNode('RepeatLatentBatch', {
-        'samples': _nodeRef(encodedLatent, 0),
-        'amount': frames,
-      });
-    } else {
-      // Text-to-video mode - create empty video latent
-      // Try EmptyLTXVLatentVideo, fall back to EmptyLatentImage with batch
-      _latentNode = _addNode('EmptyLatentImage', {
-        'width': width,
-        'height': height,
-        'batch_size': frames,
-      });
+    // Apply LoRAs if provided (use LoraLoaderModelOnly for video models)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'model': _nodeRef(_modelNode, _modelOutput),
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+      }
     }
 
-    // LTX uses its own sampler, but KSampler works as fallback
-    // Actual LTX would use LTXVSampler
-    _samplerNode = _addNode('KSampler', {
-      'seed': resolvedSeed,
-      'steps': steps,
-      'cfg': cfg,
+    // Node 3: Positive prompt encoding
+    _positiveNode = _addNode('CLIPTextEncode', {
+      'text': prompt,
+      'clip': _nodeRef(clipNode, 0),
+    });
+
+    // Node 4: Negative prompt encoding
+    _negativeNode = _addNode('CLIPTextEncode', {
+      'text': negativePrompt,
+      'clip': _nodeRef(clipNode, 0),
+    });
+
+    // Node 8: KSamplerSelect
+    final samplerSelectNode = _addNode('KSamplerSelect', {
       'sampler_name': 'euler',
-      'scheduler': 'normal',
-      'denoise': 1.0,
-      'model': _nodeRef(_modelNode, _modelOutput),
+    });
+
+    // Node 11: RandomNoise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // Node 22: LTXVConditioning - adds frame rate to conditioning
+    final conditioningNode = _addNode('LTXVConditioning', {
+      'frame_rate': fps.toDouble(),
       'positive': _nodeRef(_positiveNode, 0),
       'negative': _nodeRef(_negativeNode, 0),
+    });
+
+    // Node 43: EmptyLTXVLatentVideo
+    _latentNode = _addNode('EmptyLTXVLatentVideo', {
+      'width': width,
+      'height': height,
+      'length': frames,
+      'batch_size': 1,
+    });
+
+    // Node 9: LTXVScheduler
+    final schedulerNode = _addNode('LTXVScheduler', {
+      'steps': steps,
+      'max_shift': 2.05,
+      'base_shift': 0.95,
+      'stretch': true,
+      'terminal': 0.1,
+      'latent': _nodeRef(_latentNode, 0),
+    });
+
+    // Node 18: GuiderParameters for video
+    final guiderParamsNode = _addNode('GuiderParameters', {
+      'modality': 'VIDEO',
+      'cfg': cfg,
+      'stg': 0.0,
+      'rescale': 0.0,
+      'modality_scale': cfg,
+      'cross_attn': 1.0,
+      'skip_step': 0,
+      'perturb_attn': 0.0,
+    });
+
+    // Node 17: MultimodalGuider
+    final guiderNode = _addNode('MultimodalGuider', {
+      'skip_blocks': '29',
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(conditioningNode, 0),
+      'negative': _nodeRef(conditioningNode, 1),
+      'parameters': _nodeRef(guiderParamsNode, 0),
+    });
+
+    // Node 41: SamplerCustomAdvanced
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerSelectNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
       'latent_image': _nodeRef(_latentNode, 0),
     });
 
-    // VAE Decode
+    // Node 12: VAE Decode
     _imageNode = _addNode('VAEDecode', {
       'samples': _nodeRef(_samplerNode, 0),
       'vae': _nodeRef(_vaeNode, _vaeOutput),
     });
 
-    // Combine frames to video
+    // VHS_VideoCombine - combine frames to video
     _addNode('VHS_VideoCombine', {
       'images': _nodeRef(_imageNode, 0),
       'frame_rate': fps,
       'loop_count': 0,
       'filename_prefix': filenamePrefix,
-      'format': outputFormat,
+      'format': 'video/h264-mp4',
+      'pix_fmt': 'yuv420p',
+      'crf': 19,
+      'save_metadata': true,
       'pingpong': false,
       'save_output': true,
     });
@@ -1733,6 +1767,8 @@ class ComfyUIWorkflowBuilder {
     double motionScale = 1.0,
     // Wan-specific parameters
     double switchRatio = 0.5,
+    // LoRAs
+    List<LoraConfig>? loras,
   }) {
     final modelLower = model.toLowerCase();
 
@@ -1753,6 +1789,7 @@ class ComfyUIWorkflowBuilder {
         videoAugmentationLevel: videoAugmentationLevel,
         filenamePrefix: filenamePrefix,
         outputFormat: outputFormat,
+        loras: loras,
       );
     }
 

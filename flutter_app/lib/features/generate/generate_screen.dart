@@ -5,7 +5,7 @@ import '../../providers/providers.dart';
 import '../../widgets/widgets.dart';
 import 'widgets/eri_parameters_panel.dart';
 import 'widgets/eri_bottom_panel.dart';
-import 'widgets/autocomplete_prompt_field.dart';
+import 'widgets/prompt_bar.dart';
 import 'widgets/image_metadata_panel.dart';
 
 /// Panel width providers for resizable panels
@@ -118,7 +118,7 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
                       ),
                     ),
                     // Prompt bar with autocomplete - above bottom tabs
-                    const AutocompletePromptBar(),
+                    const PromptBar(),
                   ],
                 ),
               ),

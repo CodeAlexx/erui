@@ -25,7 +25,7 @@ class SessionState {
   const SessionState({
     this.sessionId,
     this.host = 'localhost',
-    this.port = 8188,
+    this.port = 8199,
     this.isConnected = false,
     this.isLoading = false,
     this.error,
@@ -73,7 +73,7 @@ class SessionNotifier extends StateNotifier<SessionState> {
   /// Initialize connection from saved settings
   Future<void> _initConnection() async {
     final savedHost = StorageService.getStringStatic('comfy_host') ?? 'localhost';
-    final savedPort = StorageService.getIntStatic('comfy_port') ?? 8188;
+    final savedPort = StorageService.getIntStatic('comfy_port') ?? 8199;
 
     state = state.copyWith(host: savedHost, port: savedPort);
     _comfyService.configure(host: savedHost, port: savedPort);

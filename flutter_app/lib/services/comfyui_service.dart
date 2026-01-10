@@ -96,7 +96,7 @@ class ComfyUIService {
   late Dio _dio;
   WebSocketChannel? _wsChannel;
   String _host = 'localhost';
-  int _port = 8188;
+  int _port = 8199;
   String _clientId = '';
 
   String get _baseUrl => 'http://$_host:$_port';
@@ -367,24 +367,53 @@ class ComfyUIService {
 
     if (promptId == null || output == null) return;
 
+    final outputUrls = <String>[];
+
     // Check if output contains images
     final images = output['images'] as List?;
     if (images != null && images.isNotEmpty) {
-      final imageUrls = images.map((img) {
+      for (final img in images) {
         final filename = img['filename'] as String?;
         final subfolder = img['subfolder'] as String? ?? '';
         final imgType = img['type'] as String? ?? 'output';
         if (filename != null) {
-          return getImageUrl(filename, subfolder: subfolder, type: imgType);
+          outputUrls.add(getImageUrl(filename, subfolder: subfolder, type: imgType));
         }
-        return null;
-      }).whereType<String>().toList();
+      }
+    }
 
+    // Check for gifs (video output from VHS_VideoCombine etc)
+    final gifs = output['gifs'] as List?;
+    if (gifs != null && gifs.isNotEmpty) {
+      for (final gif in gifs) {
+        final filename = gif['filename'] as String?;
+        final subfolder = gif['subfolder'] as String? ?? '';
+        final gifType = gif['type'] as String? ?? 'output';
+        if (filename != null) {
+          outputUrls.add(getImageUrl(filename, subfolder: subfolder, type: gifType));
+        }
+      }
+    }
+
+    // Check for video output
+    final videos = output['video'] as List?;
+    if (videos != null && videos.isNotEmpty) {
+      for (final video in videos) {
+        final filename = video['filename'] as String?;
+        final subfolder = video['subfolder'] as String? ?? '';
+        final videoType = video['type'] as String? ?? 'output';
+        if (filename != null) {
+          outputUrls.add(getImageUrl(filename, subfolder: subfolder, type: videoType));
+        }
+      }
+    }
+
+    if (outputUrls.isNotEmpty) {
       final current = _activeExecutions[promptId];
       if (current != null) {
         final existingImages = current.outputImages ?? [];
         _activeExecutions[promptId] = current.copyWith(
-          outputImages: [...existingImages, ...imageUrls],
+          outputImages: [...existingImages, ...outputUrls],
           status: 'executed',
         );
         _progressController.add(_activeExecutions[promptId]!);
@@ -836,6 +865,7 @@ class ComfyUIService {
   }
 
   /// Get outputs for a completed prompt from history
+  /// Handles both images and video/gif outputs
   Future<List<String>> getOutputImages(String promptId) async {
     final history = await getHistory(promptId);
     if (history == null) return [];
@@ -846,6 +876,7 @@ class ComfyUIService {
     final images = <String>[];
     for (final nodeOutput in outputs.values) {
       if (nodeOutput is Map<String, dynamic>) {
+        // Check for standard images output
         final nodeImages = nodeOutput['images'] as List?;
         if (nodeImages != null) {
           for (final img in nodeImages) {
@@ -853,6 +884,36 @@ class ComfyUIService {
               final filename = img['filename'] as String?;
               final subfolder = img['subfolder'] as String? ?? '';
               final type = img['type'] as String? ?? 'output';
+              if (filename != null) {
+                images.add(getImageUrl(filename, subfolder: subfolder, type: type));
+              }
+            }
+          }
+        }
+
+        // Check for gifs output (VHS_VideoCombine and similar nodes)
+        final nodeGifs = nodeOutput['gifs'] as List?;
+        if (nodeGifs != null) {
+          for (final gif in nodeGifs) {
+            if (gif is Map<String, dynamic>) {
+              final filename = gif['filename'] as String?;
+              final subfolder = gif['subfolder'] as String? ?? '';
+              final type = gif['type'] as String? ?? 'output';
+              if (filename != null) {
+                images.add(getImageUrl(filename, subfolder: subfolder, type: type));
+              }
+            }
+          }
+        }
+
+        // Check for video output (some nodes use 'video' key)
+        final nodeVideos = nodeOutput['video'] as List?;
+        if (nodeVideos != null) {
+          for (final video in nodeVideos) {
+            if (video is Map<String, dynamic>) {
+              final filename = video['filename'] as String?;
+              final subfolder = video['subfolder'] as String? ?? '';
+              final type = video['type'] as String? ?? 'output';
               if (filename != null) {
                 images.add(getImageUrl(filename, subfolder: subfolder, type: type));
               }

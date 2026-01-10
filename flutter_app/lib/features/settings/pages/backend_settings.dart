@@ -23,7 +23,7 @@ class ComfyConnectionInfo {
 
   const ComfyConnectionInfo({
     this.host = 'localhost',
-    this.port = 8188,
+    this.port = 8199,
     this.state = ComfyConnectionState.disconnected,
     this.errorMessage,
     this.autoConnect = true,
@@ -78,7 +78,7 @@ class ComfyConnectionNotifier extends StateNotifier<ComfyConnectionInfo> {
   /// Load saved connection settings
   Future<void> _loadSavedConnection() async {
     final host = StorageService.getStringStatic('comfy_host') ?? 'localhost';
-    final port = StorageService.getInt('comfy_port') ?? 8188;
+    final port = StorageService.getInt('comfy_port') ?? 8199;
     final autoConnect = StorageService.getBool('comfy_auto_connect') ?? true;
     final autoReconnect = StorageService.getBool('comfy_auto_reconnect') ?? true;
 
@@ -292,8 +292,8 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                           controller: _portController,
                           decoration: const InputDecoration(
                             labelText: 'Port',
-                            hintText: '8188',
-                            helperText: 'Default: 8188',
+                            hintText: '8199',
+                            helperText: 'Default: 8199',
                           ),
                           keyboardType: TextInputType.number,
                         ),
@@ -316,7 +316,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                           onPressed: connectionInfo.isConnecting
                               ? null
                               : () async {
-                                  final port = int.tryParse(_portController.text) ?? 8188;
+                                  final port = int.tryParse(_portController.text) ?? 8199;
                                   await ref.read(comfyConnectionStateProvider.notifier).updateSettings(
                                         host: _hostController.text,
                                         port: port,
@@ -403,7 +403,7 @@ class _BackendSettingsPageState extends ConsumerState<BackendSettingsPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Default ComfyUI port: 8188',
+                    'Default ComfyUI port: 8199',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: colorScheme.outline,
                         ),

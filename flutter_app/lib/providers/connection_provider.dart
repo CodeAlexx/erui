@@ -18,7 +18,7 @@ class ConnectionInfo {
 
   const ConnectionInfo({
     this.host = 'localhost',
-    this.port = 8188,
+    this.port = 8199,
     this.state = ComfyConnectionState.disconnected,
     this.errorMessage,
   });
@@ -69,7 +69,7 @@ class ConnectionNotifier extends StateNotifier<ConnectionInfo> {
   /// Load saved connection settings
   Future<void> _loadSavedConnection() async {
     final host = StorageService.getStringStatic('comfyui_host') ?? 'localhost';
-    final port = StorageService.getInt('comfyui_port') ?? 8188;
+    final port = StorageService.getInt('comfyui_port') ?? 8199;
 
     state = state.copyWith(host: host, port: port);
     _comfyService.configure(host: host, port: port);

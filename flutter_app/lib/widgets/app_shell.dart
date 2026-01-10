@@ -43,10 +43,11 @@ class AppShell extends StatelessWidget {
                   isSelected: location.startsWith('/comfyui'),
                   onTap: () => context.go('/comfyui'),
                 ),
-                _TopTab(
-                  label: 'Utilities',
-                  isSelected: false,
-                  onTap: () {}, // TODO
+                // Utilities dropdown
+                _UtilitiesDropdown(
+                  isSelected: location.startsWith('/tools') ||
+                      location.startsWith('/wildcards') ||
+                      location.startsWith('/regional'),
                 ),
                 _TopTab(
                   label: 'User',
@@ -54,9 +55,9 @@ class AppShell extends StatelessWidget {
                   onTap: () => context.go('/settings'),
                 ),
                 _TopTab(
-                  label: 'Server',
-                  isSelected: false,
-                  onTap: () {}, // TODO
+                  label: 'Workflow',
+                  isSelected: location.startsWith('/workflow'),
+                  onTap: () => context.go('/workflow-builder'),
                 ),
                 const Spacer(),
                 // Quick Tools button like ERI
@@ -106,6 +107,98 @@ class AppShell extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Utilities dropdown menu
+class _UtilitiesDropdown extends StatelessWidget {
+  final bool isSelected;
+
+  const _UtilitiesDropdown({required this.isSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return PopupMenuButton<String>(
+      onSelected: (route) => context.go(route),
+      tooltip: 'Utilities',
+      offset: const Offset(0, 40),
+      itemBuilder: (context) => [
+        _buildMenuItem(context, 'Analytics', Icons.analytics, '/tools/analytics'),
+        _buildMenuItem(context, 'Batch Processing', Icons.batch_prediction, '/tools/batch'),
+        _buildMenuItem(context, 'Grid Generator', Icons.grid_on, '/tools/grid'),
+        _buildMenuItem(context, 'Image Interrogator', Icons.psychology, '/tools/interrogator'),
+        _buildMenuItem(context, 'Model Comparison', Icons.compare, '/tools/compare'),
+        _buildMenuItem(context, 'Model Merger', Icons.merge, '/tools/merger'),
+        const PopupMenuDivider(),
+        _buildMenuItem(context, 'Wildcards', Icons.shuffle, '/wildcards'),
+        _buildMenuItem(context, 'Regional Prompts', Icons.crop_free, '/regional'),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? colorScheme.primary.withOpacity(0.15) : null,
+          border: Border(
+            bottom: BorderSide(
+              color: isSelected ? colorScheme.primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Utilities',
+              style: TextStyle(
+                color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 18,
+              color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildMenuItem(
+    BuildContext context,
+    String label,
+    IconData icon,
+    String route,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final location = GoRouterState.of(context).uri.path;
+    final isActive = location == route;
+
+    return PopupMenuItem<String>(
+      value: route,
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: isActive ? colorScheme.primary : colorScheme.onSurface,
+          ),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: TextStyle(
+              color: isActive ? colorScheme.primary : colorScheme.onSurface,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ],
       ),
     );
   }

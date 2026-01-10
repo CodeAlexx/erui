@@ -28,7 +28,7 @@ import '../../wildcards/wildcards_screen.dart';
 enum BottomTab { history, presets, models, loras, vaes, embeddings, controlnets, wildcards, tools }
 
 final bottomTabProvider = StateProvider<BottomTab>((ref) => BottomTab.history);
-final bottomPanelHeightProvider = StateProvider<double>((ref) => 0); // 0 = collapsed
+// Note: bottomPanelHeightProvider is defined in generate_screen.dart
 
 /// ERI-style bottom panel with tabs
 class EriBottomPanel extends ConsumerStatefulWidget {
@@ -39,7 +39,7 @@ class EriBottomPanel extends ConsumerStatefulWidget {
 }
 
 class _EriBottomPanelState extends ConsumerState<EriBottomPanel> {
-  double _panelHeight = 0; // 0 = collapsed, otherwise height in pixels
+  double _panelHeight = 200; // Start expanded with default height
   static const double _minHeight = 100; // Minimum when open
   static const double _collapseThreshold = 50; // Below this, auto-collapse
   static const double _maxHeight = 500;
@@ -55,43 +55,11 @@ class _EriBottomPanelState extends ConsumerState<EriBottomPanel> {
         border: Border(top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3))),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          // Resizable tab content panel
-          if (_panelHeight > 0) ...[
-            // Drag handle for resizing
-            GestureDetector(
-              onVerticalDragUpdate: (details) {
-                setState(() {
-                  final newHeight = _panelHeight - details.delta.dy;
-                  if (newHeight < _collapseThreshold) {
-                    _panelHeight = 0; // Collapse
-                  } else {
-                    _panelHeight = newHeight.clamp(_minHeight, _maxHeight);
-                  }
-                });
-              },
-              child: Container(
-                height: 8,
-                color: colorScheme.surfaceContainerHighest,
-                child: Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: colorScheme.outlineVariant,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            // Tab content
-            SizedBox(
-              height: _panelHeight,
-              child: _TabContent(selectedTab: selectedTab),
-            ),
-          ],
+          // Tab content - fills available space
+          Expanded(
+            child: _TabContent(selectedTab: selectedTab),
+          ),
 
           // Current LoRAs row (above tab bar, like SwarmUI)
           _CurrentLorasRow(),
