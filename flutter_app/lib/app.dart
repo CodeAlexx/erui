@@ -11,6 +11,17 @@ import 'features/comfy_workflow/comfy_workflow_screen.dart';
 import 'features/comfyui_editor/comfyui_editor_screen.dart';
 import 'features/editor/editor_screen.dart';
 import 'features/trainer/onetrainer_shell.dart';
+// Tools screens
+import 'features/tools/analytics_screen.dart';
+import 'features/tools/batch_processing_screen.dart';
+import 'features/tools/grid_generator_screen.dart';
+import 'features/tools/image_interrogator_screen.dart';
+import 'features/tools/model_comparison_screen.dart';
+import 'features/tools/model_merger_screen.dart';
+// Other orphaned screens
+import 'features/wildcards/wildcards_screen.dart';
+import 'features/workflow/workflow_screen.dart';
+import 'features/regional/regional_prompt_editor.dart';
 import 'widgets/app_shell.dart';
 import 'providers/theme_provider.dart';
 
@@ -103,6 +114,71 @@ final _router = GoRouter(
           name: 'trainer',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: OneTrainerShell(),
+          ),
+        ),
+        // Tools routes
+        GoRoute(
+          path: '/tools/analytics',
+          name: 'analytics',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: AnalyticsScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/batch',
+          name: 'batch',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: BatchProcessingScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/grid',
+          name: 'grid',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: GridGeneratorScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/interrogator',
+          name: 'interrogator',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: ImageInterrogatorScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/compare',
+          name: 'compare',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: ModelComparisonScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/merger',
+          name: 'merger',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: ModelMergerScreen(),
+          ),
+        ),
+        // Other screens
+        GoRoute(
+          path: '/wildcards',
+          name: 'wildcards',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: WildcardsScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/workflow-builder',
+          name: 'workflow-builder',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: WorkflowScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/regional',
+          name: 'regional',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: RegionalPromptEditor(),
           ),
         ),
       ],
