@@ -4,16 +4,18 @@ EriUI Server Manager
 ====================
 Manages all eriui backend services:
 - ComfyUI (port 8199)
-- OneTrainer API (port 8200)
-- CORS Server (port 8899)
-- Flutter App
+- OneTrainer Web UI (port 8100)
+- CORS Server (port 8899) - only for web mode
+- Flutter App (desktop or web)
 
 Usage:
-  python server_manager.py          # Interactive menu
-  python server_manager.py start    # Start all services
-  python server_manager.py stop     # Stop all services
-  python server_manager.py status   # Show status of all services
-  python server_manager.py restart  # Restart all services
+  python server_manager.py              # Interactive menu
+  python server_manager.py start        # Start desktop mode (ComfyUI + OneTrainer + Flutter)
+  python server_manager.py start --web  # Start web mode (adds CORS server, uses Chrome)
+  python server_manager.py stop         # Stop all services
+  python server_manager.py status       # Show status of all services
+  python server_manager.py restart      # Restart all services
+  python server_manager.py logs <name>  # View logs for a service
 """
 
 import os
@@ -46,6 +48,8 @@ class Service:
     env_setup: Optional[str] = None  # e.g., "source venv/bin/activate"
     pid_file: Optional[Path] = None
     log_file: Optional[Path] = None
+    optional: bool = False  # If True, not started by default with "start all"
+    description: str = ""
 
     def __post_init__(self):
         self.pid_file = PID_DIR / f"{self.name}.pid"
@@ -72,12 +76,22 @@ SERVICES = {
         port=8899,
         start_cmd=["python3", "cors_server.py"],
         cwd=ERIUI_DIR,
+        optional=True,
+        description="Only needed for web mode",
     ),
     "flutter": Service(
         name="flutter",
         port=0,  # Flutter doesn't bind a specific port we manage
         start_cmd=[str(FLUTTER_BIN), "run", "-d", "linux"],
         cwd=FLUTTER_APP_DIR,
+    ),
+    "flutter-web": Service(
+        name="flutter-web",
+        port=0,
+        start_cmd=[str(FLUTTER_BIN), "run", "-d", "chrome", "--web-port", "8080"],
+        cwd=FLUTTER_APP_DIR,
+        optional=True,
+        description="Web mode (use instead of flutter)",
     ),
 }
 
@@ -169,9 +183,9 @@ def get_service_status(service: Service) -> dict:
 def print_status_table():
     """Print status of all services in a table format"""
     print(colored("Service Status:", Colors.BOLD))
-    print("-" * 60)
-    print(f"{'Service':<15} {'Status':<20} {'PID':<10} {'Port':<10}")
-    print("-" * 60)
+    print("-" * 70)
+    print(f"{'Service':<15} {'Status':<20} {'PID':<10} {'Port':<10} {'Note':<15}")
+    print("-" * 70)
 
     for name, service in SERVICES.items():
         status = get_service_status(service)
@@ -188,10 +202,11 @@ def print_status_table():
 
         pid_str = str(status["pid"]) if status["pid"] else "-"
         port_str = str(status["port"]) if status["port"] else "-"
+        note_str = "(optional)" if service.optional else ""
 
-        print(f"{name:<15} {status_str:<29} {pid_str:<10} {port_str:<10}")
+        print(f"{name:<15} {status_str:<29} {pid_str:<10} {port_str:<10} {note_str:<15}")
 
-    print("-" * 60)
+    print("-" * 70)
     print()
 
 
@@ -312,13 +327,22 @@ def stop_service(service: Service) -> bool:
         return False
 
 
-def start_all():
-    """Start all services in order"""
-    print(colored("\nStarting all services...\n", Colors.BOLD))
+def start_all(web_mode: bool = False):
+    """Start all services in order
+
+    Args:
+        web_mode: If True, starts CORS server and flutter-web instead of flutter desktop
+    """
+    mode_str = "WEB" if web_mode else "DESKTOP"
+    print(colored(f"\nStarting all services ({mode_str} mode)...\n", Colors.BOLD))
     ensure_dirs()
 
-    # Start order: cors -> comfyui -> onetrainer -> flutter
-    order = ["cors", "comfyui", "onetrainer", "flutter"]
+    if web_mode:
+        # Web mode: cors + comfyui + onetrainer + flutter-web
+        order = ["cors", "comfyui", "onetrainer", "flutter-web"]
+    else:
+        # Desktop mode: comfyui + onetrainer + flutter (no CORS needed)
+        order = ["comfyui", "onetrainer", "flutter"]
 
     for name in order:
         if name in SERVICES:
@@ -329,15 +353,17 @@ def start_all():
 
 
 def stop_all():
-    """Stop all services"""
+    """Stop all services (both desktop and web)"""
     print(colored("\nStopping all services...\n", Colors.BOLD))
 
-    # Stop in reverse order
-    order = ["flutter", "onetrainer", "comfyui", "cors"]
+    # Stop in reverse order (includes both flutter variants)
+    order = ["flutter", "flutter-web", "onetrainer", "comfyui", "cors"]
 
     for name in order:
         if name in SERVICES:
-            stop_service(SERVICES[name])
+            status = get_service_status(SERVICES[name])
+            if status["status"] != "stopped":
+                stop_service(SERVICES[name])
 
     # Also clean up any lock files
     lock_file = Path("/home/alex/Documents/eriui_storage.lock")
@@ -349,11 +375,11 @@ def stop_all():
     print_status_table()
 
 
-def restart_all():
+def restart_all(web_mode: bool = False):
     """Restart all services"""
     stop_all()
     time.sleep(2)
-    start_all()
+    start_all(web_mode=web_mode)
 
 
 def show_logs(service_name: str, lines: int = 50):
@@ -444,13 +470,14 @@ def main():
 
     if len(sys.argv) > 1:
         cmd = sys.argv[1].lower()
+        web_mode = "--web" in sys.argv or "-w" in sys.argv
 
         if cmd == "start":
-            start_all()
+            start_all(web_mode=web_mode)
         elif cmd == "stop":
             stop_all()
         elif cmd == "restart":
-            restart_all()
+            restart_all(web_mode=web_mode)
         elif cmd == "status":
             print_header()
             print_status_table()
@@ -458,6 +485,8 @@ def main():
             show_logs(sys.argv[2])
         else:
             print(__doc__)
+            print("\nFlags:")
+            print("  --web, -w    Start in web mode (includes CORS server)")
     else:
         interactive_menu()
 
