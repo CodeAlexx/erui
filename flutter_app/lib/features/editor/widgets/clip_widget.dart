@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/editor_models.dart';
+import '../providers/clip_thumbnail_provider.dart';
 
 /// A widget representing a single clip on the video editor timeline.
 ///
 /// Displays clip information including name, type icon, thumbnail preview,
 /// and supports dragging, resizing from edges, and selection highlighting.
-class ClipWidget extends StatefulWidget {
+class ClipWidget extends ConsumerStatefulWidget {
   /// The clip data model
   final EditorClip clip;
 
@@ -50,10 +52,10 @@ class ClipWidget extends StatefulWidget {
   });
 
   @override
-  State<ClipWidget> createState() => _ClipWidgetState();
+  ConsumerState<ClipWidget> createState() => _ClipWidgetState();
 }
 
-class _ClipWidgetState extends State<ClipWidget>
+class _ClipWidgetState extends ConsumerState<ClipWidget>
     with SingleTickerProviderStateMixin {
   bool _isHovered = false;
   bool _isResizingStart = false;
@@ -304,9 +306,65 @@ class _ClipWidgetState extends State<ClipWidget>
     );
   }
 
-  /// Build thumbnail preview placeholder
+  /// Build thumbnail preview with actual video frames
   Widget _buildThumbnailPreview(Color clipColor) {
-    // For now, create a subtle pattern as placeholder
+    // Only video clips get frame thumbnails
+    if (widget.clip.type != ClipType.video || widget.clip.sourcePath == null) {
+      return Opacity(
+        opacity: 0.15,
+        child: CustomPaint(
+          painter: _ThumbnailPlaceholderPainter(
+            color: Colors.white,
+            clipType: widget.clip.type,
+          ),
+        ),
+      );
+    }
+
+    // Calculate how many thumbnails to show based on clip width
+    final thumbnailCount = ClipThumbnailCache.getThumbnailCount(_clipWidth);
+
+    // Watch the thumbnail provider
+    final thumbnailsAsync = ref.watch(
+      clipThumbnailsProvider((clip: widget.clip, count: thumbnailCount)),
+    );
+
+    return thumbnailsAsync.when(
+      data: (thumbnails) {
+        if (thumbnails.isEmpty) {
+          return _buildPlaceholderPattern();
+        }
+        return Row(
+          children: thumbnails
+              .map(
+                (bytes) => Expanded(
+                  child: Image.memory(
+                    bytes,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  ),
+                ),
+              )
+              .toList(),
+        );
+      },
+      loading: () => Stack(
+        children: [
+          _buildPlaceholderPattern(),
+          const Center(
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+            ),
+          ),
+        ],
+      ),
+      error: (_, __) => _buildPlaceholderPattern(),
+    );
+  }
+
+  Widget _buildPlaceholderPattern() {
     return Opacity(
       opacity: 0.15,
       child: CustomPaint(

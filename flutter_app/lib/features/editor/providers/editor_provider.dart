@@ -68,9 +68,22 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectState> {
   EditorProjectNotifier()
       : super(EditorProjectState(
           project: EditorProject(
-            name: 'Untitled Project',
+            name: 'Test Project',
             tracks: [
-              Track(type: TrackType.video, name: 'Video 1'),
+              Track(
+                type: TrackType.video,
+                name: 'Video 1',
+                clips: [
+                  EditorClip(
+                    type: ClipType.video,
+                    name: 'Test Video Clip',
+                    timelineStart: const EditorTime.zero(),
+                    duration: const EditorTime(5000000), // 5 seconds
+                    sourcePath: 'http://localhost:8899/2c1ed5408882479b06681f7cf372916a.mp4',
+                    sourceDuration: const EditorTime(5000000),
+                  ),
+                ],
+              ),
               Track(type: TrackType.video, name: 'Video 2'),
               Track(type: TrackType.audio, name: 'Audio 1'),
               Track(type: TrackType.audio, name: 'Audio 2'),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import 'models/editor_models.dart';
 import 'providers/editor_provider.dart';
@@ -51,6 +52,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
   double _inspectorWidth = 320;
 
   final FocusNode _keyboardFocusNode = FocusNode();
+
+  // Playback options
+  bool _isLooping = false;
+  double _volume = 1.0;
+  double _playbackSpeed = 1.0;
 
   // Tab controller for right panel
   late TabController _rightPanelTabController;
@@ -274,33 +280,83 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
           ),
           _ToolbarButton(
             icon: Icons.loop,
-            tooltip: 'Loop Playback',
-            onPressed: () {},
+            tooltip: _isLooping ? 'Disable Loop' : 'Enable Loop',
+            onPressed: () => setState(() => _isLooping = !_isLooping),
+            highlighted: _isLooping,
           ),
 
           const SizedBox(width: 8),
 
           // Speed selector
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: colorScheme.outlineVariant),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.speed, size: 16, color: colorScheme.onSurfaceVariant),
-                const SizedBox(width: 4),
-                Text('1x', style: TextStyle(fontSize: 12, color: colorScheme.onSurface)),
-                Icon(Icons.arrow_drop_down, size: 16, color: colorScheme.onSurfaceVariant),
-              ],
+          PopupMenuButton<double>(
+            onSelected: (speed) {
+              setState(() => _playbackSpeed = speed);
+              ref.read(playbackControllerProvider).setPlaybackRate(speed);
+            },
+            tooltip: 'Playback Speed',
+            itemBuilder: (context) => [
+              for (final speed in [0.25, 0.5, 1.0, 1.5, 2.0, 4.0])
+                PopupMenuItem(
+                  value: speed,
+                  child: Text(
+                    '${speed}x',
+                    style: TextStyle(
+                      fontWeight: speed == _playbackSpeed ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: colorScheme.outlineVariant),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.speed, size: 16, color: colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text('${_playbackSpeed}x', style: TextStyle(fontSize: 12, color: colorScheme.onSurface)),
+                  Icon(Icons.arrow_drop_down, size: 16, color: colorScheme.onSurfaceVariant),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          // Volume
-          Icon(Icons.volume_up, size: 18, color: colorScheme.onSurfaceVariant),
+          // Volume control
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  _volume == 0 ? Icons.volume_off : (_volume < 0.5 ? Icons.volume_down : Icons.volume_up),
+                  size: 18,
+                ),
+                color: _volume == 0 ? Colors.red : colorScheme.onSurfaceVariant,
+                tooltip: _volume == 0 ? 'Unmute' : 'Mute',
+                onPressed: () {
+                  setState(() => _volume = _volume == 0 ? 1.0 : 0.0);
+                  ref.read(playbackControllerProvider).player.setVolume(_volume * 100);
+                },
+                constraints: const BoxConstraints(minWidth: 32),
+                padding: EdgeInsets.zero,
+              ),
+              SizedBox(
+                width: 60,
+                child: Slider(
+                  value: _volume,
+                  min: 0,
+                  max: 1,
+                  onChanged: (v) {
+                    setState(() => _volume = v);
+                    ref.read(playbackControllerProvider).player.setVolume(v * 100);
+                  },
+                ),
+              ),
+            ],
+          ),
 
           const SizedBox(width: 16),
 
@@ -375,6 +431,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
     final editorState = ref.watch(editorProjectProvider);
     final project = editorState.project;
     final playbackState = ref.watch(playbackStateProvider);
+    final videoController = ref.watch(videoControllerProvider);
 
     return Container(
       margin: const EdgeInsets.all(8),
@@ -384,16 +441,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: PreviewPanel(
+        videoWidget: Video(controller: videoController),
         currentTime: project.playheadPosition,
         duration: project.duration,
         isPlaying: playbackState == PlaybackState.playing,
         playbackSpeed: 1.0,
         volume: 1.0,
         isLooping: false,
-        onPlay: () => ref.read(editorProjectProvider.notifier).play(),
-        onPause: () => ref.read(editorProjectProvider.notifier).pause(),
-        onStop: () => ref.read(editorProjectProvider.notifier).stop(),
+        onPlay: () => ref.read(playbackControllerProvider).play(),
+        onPause: () => ref.read(playbackControllerProvider).pause(),
+        onStop: () => ref.read(playbackControllerProvider).stop(),
         onSeek: (time) => ref.read(editorProjectProvider.notifier).setPlayhead(time),
+        onStepForward: () => ref.read(playbackControllerProvider).stepFrame(1),
+        onStepBackward: () => ref.read(playbackControllerProvider).stepFrame(-1),
       ),
     );
   }

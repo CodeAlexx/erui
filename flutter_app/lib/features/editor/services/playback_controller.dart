@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/editor_models.dart';
 import '../providers/editor_provider.dart';
@@ -47,6 +48,9 @@ class PlaybackController {
   /// The media_kit player instance
   final Player _player;
 
+  /// The video controller for rendering video frames
+  late final VideoController _videoController;
+
   /// Reference to read Riverpod providers
   final Ref _ref;
 
@@ -81,6 +85,7 @@ class PlaybackController {
   bool _disposed = false;
 
   PlaybackController(this._ref) : _player = Player() {
+    _videoController = VideoController(_player);
     _setupPlayerListeners();
   }
 
@@ -117,6 +122,9 @@ class PlaybackController {
 
   /// The underlying media_kit player (for video display)
   Player get player => _player;
+
+  /// The video controller for rendering
+  VideoController get videoController => _videoController;
 
   // ============================================================
   // Playback Control Methods
@@ -639,4 +647,10 @@ final isPlayingProvider = Provider<bool>((ref) {
 final mediaPlayerProvider = Provider<Player>((ref) {
   final controller = ref.watch(playbackControllerProvider);
   return controller.player;
+});
+
+/// Provider for the video controller (for Video widget)
+final videoControllerProvider = Provider<VideoController>((ref) {
+  final controller = ref.watch(playbackControllerProvider);
+  return controller.videoController;
 });
