@@ -54,10 +54,9 @@ class AppShell extends StatelessWidget {
                   isSelected: location.startsWith('/settings'),
                   onTap: () => context.go('/settings'),
                 ),
-                _TopTab(
-                  label: 'Workflow',
+                // Workflow dropdown with browser and editor options
+                _WorkflowDropdown(
                   isSelected: location.startsWith('/workflow'),
-                  onTap: () => context.go('/workflow-builder'),
                 ),
                 const Spacer(),
                 // Quick Tools button like ERI
@@ -180,6 +179,94 @@ class _UtilitiesDropdown extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final location = GoRouterState.of(context).uri.path;
     final isActive = location == route;
+
+    return PopupMenuItem<String>(
+      value: route,
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            size: 18,
+            color: isActive ? colorScheme.primary : colorScheme.onSurface,
+          ),
+          const SizedBox(width: 12),
+          Text(
+            label,
+            style: TextStyle(
+              color: isActive ? colorScheme.primary : colorScheme.onSurface,
+              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Workflow dropdown menu for workflow management
+class _WorkflowDropdown extends StatelessWidget {
+  final bool isSelected;
+
+  const _WorkflowDropdown({required this.isSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return PopupMenuButton<String>(
+      onSelected: (route) => context.go(route),
+      tooltip: 'Workflow',
+      offset: const Offset(0, 40),
+      itemBuilder: (context) => [
+        _buildMenuItem(context, 'Workflow Browser', Icons.folder_open, '/workflow-browser'),
+        _buildMenuItem(context, 'New Workflow', Icons.add_circle_outline, '/workflow/new'),
+        const PopupMenuDivider(),
+        _buildMenuItem(context, 'Visual Builder', Icons.account_tree, '/workflow-builder'),
+        _buildMenuItem(context, 'ComfyUI', Icons.code, '/comfyui'),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? colorScheme.primary.withOpacity(0.15) : null,
+          border: Border(
+            bottom: BorderSide(
+              color: isSelected ? colorScheme.primary : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Workflow',
+              style: TextStyle(
+                color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Icon(
+              Icons.arrow_drop_down,
+              size: 18,
+              color: isSelected ? colorScheme.primary : colorScheme.onSurface,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _buildMenuItem(
+    BuildContext context,
+    String label,
+    IconData icon,
+    String route,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final location = GoRouterState.of(context).uri.path;
+    final isActive = location == route || location.startsWith(route);
 
     return PopupMenuItem<String>(
       value: route,

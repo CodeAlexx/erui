@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../providers/providers.dart';
 import '../../widgets/widgets.dart';
@@ -7,11 +8,21 @@ import 'widgets/eri_parameters_panel.dart';
 import 'widgets/eri_bottom_panel.dart';
 import 'widgets/prompt_bar.dart';
 import 'widgets/image_metadata_panel.dart';
+// Workflow integration
+import '../workflow_browser/workflow_browser.dart';
+import '../workflow_browser/workflow_params_panel.dart';
+import '../workflow_browser/providers/workflow_execution_provider.dart';
 
 /// Panel width providers for resizable panels
 final leftPanelWidthProvider = StateProvider<double>((ref) => 320);
 final rightPanelWidthProvider = StateProvider<double>((ref) => 300);
 final bottomPanelHeightProvider = StateProvider<double>((ref) => 200);
+
+/// Provider to track if workflow browser panel is visible
+final workflowBrowserVisibleProvider = StateProvider<bool>((ref) => false);
+
+/// Provider to track currently active workflow for generation
+final activeWorkflowIdProvider = StateProvider<String?>((ref) => null);
 
 /// Main image generation screen - ERI style layout
 class GenerateScreen extends ConsumerStatefulWidget {
@@ -26,13 +37,33 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
   bool _isDraggingLeft = false;
   bool _isDraggingRight = false;
   bool _isDraggingBottom = false;
+  bool _isDraggingWorkflow = false;
+  double _workflowPanelWidth = 260;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(modelsProvider.notifier).loadModels();
+      // Check for workflow query parameter
+      _checkWorkflowQueryParam();
     });
+  }
+
+  void _checkWorkflowQueryParam() {
+    // Check if we navigated here with a workflow parameter
+    final uri = GoRouterState.of(context).uri;
+    final workflowId = uri.queryParameters['workflow'];
+    if (workflowId != null && workflowId.isNotEmpty) {
+      // Set active workflow and load it
+      ref.read(activeWorkflowIdProvider.notifier).state = workflowId;
+      ref.read(workflowBrowserProvider.notifier).selectWorkflow(workflowId);
+      // Load workflow into execution provider
+      final browserState = ref.read(workflowBrowserProvider);
+      if (browserState.selectedWorkflow != null) {
+        ref.read(workflowExecutionProvider.notifier).loadWorkflow(browserState.selectedWorkflow!);
+      }
+    }
   }
 
   void _checkGenerationComplete() {
@@ -65,7 +96,9 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
     final leftWidth = ref.watch(leftPanelWidthProvider);
     final rightWidth = ref.watch(rightPanelWidthProvider);
     final bottomHeight = ref.watch(bottomPanelHeightProvider);
-    final colorScheme = Theme.of(context).colorScheme;
+    final showWorkflowBrowser = ref.watch(workflowBrowserVisibleProvider);
+    final workflowExecState = ref.watch(workflowExecutionProvider);
+    final hasActiveWorkflow = workflowExecState.activeWorkflow != null;
 
     return Column(
       children: [
@@ -73,10 +106,49 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
         Expanded(
           child: Row(
             children: [
-              // Left panel - Scrollable parameters (resizable)
+              // Collapsible workflow browser panel (left-most)
+              if (showWorkflowBrowser) ...[
+                SizedBox(
+                  width: _workflowPanelWidth,
+                  child: _WorkflowBrowserSidePanel(
+                    onWorkflowSelected: (workflow) {
+                      ref.read(activeWorkflowIdProvider.notifier).state = workflow.id;
+                      ref.read(workflowExecutionProvider.notifier).loadWorkflow(workflow);
+                    },
+                    onClose: () {
+                      ref.read(workflowBrowserVisibleProvider.notifier).state = false;
+                    },
+                  ),
+                ),
+                // Workflow panel resize handle
+                _ResizeHandle(
+                  isVertical: true,
+                  isDragging: _isDraggingWorkflow,
+                  onDragStart: () => setState(() => _isDraggingWorkflow = true),
+                  onDragEnd: () => setState(() => _isDraggingWorkflow = false),
+                  onDragUpdate: (dx) {
+                    setState(() {
+                      _workflowPanelWidth = (_workflowPanelWidth + dx).clamp(200.0, 400.0);
+                    });
+                  },
+                ),
+              ],
+              // Left panel - Parameters or Workflow Params (resizable)
               SizedBox(
                 width: leftWidth,
-                child: EriParametersPanel(),
+                child: hasActiveWorkflow
+                    ? _WorkflowParamsLeftPanel(
+                        onClearWorkflow: () {
+                          ref.read(activeWorkflowIdProvider.notifier).state = null;
+                          ref.read(workflowExecutionProvider.notifier).loadWorkflow(
+                            // Clear by loading empty workflow
+                            workflowExecState.activeWorkflow!.copyWith(
+                              customParams: '[]',
+                            ),
+                          );
+                        },
+                      )
+                    : const EriParametersPanel(),
               ),
               // Left resize handle
               _ResizeHandle(
@@ -117,8 +189,12 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
                         }),
                       ),
                     ),
-                    // Prompt bar with autocomplete - above bottom tabs
-                    const PromptBar(),
+                    // Workflow toggle + Prompt bar with autocomplete - above bottom tabs
+                    _WorkflowPromptRow(
+                      showWorkflowBrowser: showWorkflowBrowser,
+                      hasActiveWorkflow: hasActiveWorkflow,
+                      activeWorkflowName: workflowExecState.activeWorkflow?.name,
+                    ),
                   ],
                 ),
               ),
@@ -497,6 +573,226 @@ class _ResizeHandle extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Workflow browser side panel for the generate screen
+class _WorkflowBrowserSidePanel extends ConsumerWidget {
+  final Function(dynamic) onWorkflowSelected;
+  final VoidCallback onClose;
+
+  const _WorkflowBrowserSidePanel({
+    required this.onWorkflowSelected,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      color: colorScheme.surface,
+      child: Column(
+        children: [
+          // Header with close button
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest.withOpacity(0.5),
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.account_tree, size: 18, color: colorScheme.primary),
+                const SizedBox(width: 8),
+                const Text(
+                  'Workflows',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  onPressed: onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Close workflow browser',
+                ),
+              ],
+            ),
+          ),
+          // Workflow browser content
+          Expanded(
+            child: WorkflowBrowserPanel(
+              onWorkflowSelected: onWorkflowSelected,
+              compact: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Left panel showing workflow parameters when a workflow is active
+class _WorkflowParamsLeftPanel extends ConsumerWidget {
+  final VoidCallback onClearWorkflow;
+
+  const _WorkflowParamsLeftPanel({required this.onClearWorkflow});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final workflowState = ref.watch(workflowExecutionProvider);
+    final workflow = workflowState.activeWorkflow;
+
+    if (workflow == null) {
+      return const EriParametersPanel();
+    }
+
+    return Container(
+      color: colorScheme.surface,
+      child: Column(
+        children: [
+          // Workflow header
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer.withOpacity(0.3),
+              border: Border(
+                bottom: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3)),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.account_tree, size: 18, color: colorScheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        workflow.name,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: colorScheme.onSurface,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (workflow.description != null && workflow.description!.isNotEmpty)
+                        Text(
+                          workflow.description!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  onPressed: onClearWorkflow,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  tooltip: 'Clear workflow',
+                ),
+              ],
+            ),
+          ),
+          // Workflow parameters - includes its own execute button
+          Expanded(
+            child: WorkflowParamsPanel(
+              workflow: workflow,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Row containing workflow toggle and prompt bar
+class _WorkflowPromptRow extends ConsumerWidget {
+  final bool showWorkflowBrowser;
+  final bool hasActiveWorkflow;
+  final String? activeWorkflowName;
+
+  const _WorkflowPromptRow({
+    required this.showWorkflowBrowser,
+    required this.hasActiveWorkflow,
+    this.activeWorkflowName,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        border: Border(
+          top: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3)),
+        ),
+      ),
+      child: Row(
+        children: [
+          // Workflow toggle button
+          Tooltip(
+            message: showWorkflowBrowser ? 'Hide workflows' : 'Show workflows',
+            child: InkWell(
+              onTap: () {
+                ref.read(workflowBrowserVisibleProvider.notifier).state = !showWorkflowBrowser;
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: showWorkflowBrowser
+                      ? colorScheme.primaryContainer.withOpacity(0.5)
+                      : Colors.transparent,
+                  border: Border(
+                    right: BorderSide(color: colorScheme.outlineVariant.withOpacity(0.3)),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.account_tree,
+                      size: 18,
+                      color: showWorkflowBrowser ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                    ),
+                    if (hasActiveWorkflow && activeWorkflowName != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 120),
+                        child: Text(
+                          activeWorkflowName!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+          // Prompt bar takes remaining space
+          const Expanded(child: PromptBar()),
+        ],
       ),
     );
   }

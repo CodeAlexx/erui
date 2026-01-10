@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 
 import 'app.dart';
 import 'services/storage_service.dart';
+import 'services/workflow_storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,9 @@ void main() async {
 
   // Initialize local storage service
   await StorageService.init();
+
+  // Initialize workflow storage service
+  await WorkflowStorageService.init();
 
   runApp(
     const ProviderScope(

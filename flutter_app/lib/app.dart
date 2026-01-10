@@ -22,6 +22,9 @@ import 'features/tools/model_merger_screen.dart';
 import 'features/wildcards/wildcards_screen.dart';
 import 'features/workflow/workflow_screen.dart';
 import 'features/regional/regional_prompt_editor.dart';
+// Workflow browser and editor
+import 'features/workflow_browser/workflow_browser_screen.dart';
+import 'features/workflow_editor/visual_workflow_editor.dart';
 import 'widgets/app_shell.dart';
 import 'providers/theme_provider.dart';
 
@@ -181,7 +184,50 @@ final _router = GoRouter(
             child: RegionalPromptEditor(),
           ),
         ),
+        // Workflow browser and editor routes
+        GoRoute(
+          path: '/workflow-browser',
+          name: 'workflow-browser',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: WorkflowBrowserScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/workflow/edit/:id',
+          name: 'workflow-edit',
+          pageBuilder: (context, state) {
+            final workflowId = state.pathParameters['id'];
+            return NoTransitionPage(
+              child: _WorkflowEditorWrapper(workflowId: workflowId),
+            );
+          },
+        ),
+        GoRoute(
+          path: '/workflow/new',
+          name: 'workflow-new',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: _WorkflowEditorWrapper(workflowId: null),
+          ),
+        ),
       ],
     ),
   ],
 );
+
+/// Wrapper widget that loads workflow and passes to editor
+class _WorkflowEditorWrapper extends ConsumerWidget {
+  final String? workflowId;
+
+  const _WorkflowEditorWrapper({required this.workflowId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return VisualWorkflowEditor(
+      initialWorkflow: null, // TODO: Load from provider based on workflowId
+      onSave: (workflow) {
+        // Save and navigate back
+        context.go('/workflow-browser');
+      },
+    );
+  }
+}
