@@ -62,8 +62,8 @@ SERVICES = {
     ),
     "onetrainer": Service(
         name="onetrainer",
-        port=8200,
-        start_cmd=["python", "-m", "web_ui.run", "--port", "8200"],
+        port=8100,
+        start_cmd=["python", "-m", "web_ui.run", "--port", "8100"],
         cwd=ONETRAINER_DIR,
         env_setup="source venv/bin/activate",
     ),
