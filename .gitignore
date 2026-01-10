@@ -21,3 +21,4 @@ onetrainer/web_ui/frontend/node_modules/
 onetrainer/web_ui/frontend/dist/
 onetrainer/**/*.ldb
 onetrainer/**/*.log
+.pids/
