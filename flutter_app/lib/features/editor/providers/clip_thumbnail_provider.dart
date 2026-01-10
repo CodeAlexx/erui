@@ -52,31 +52,37 @@ class ClipThumbnailCache {
     required int thumbnailCount,
   }) async {
     final clipId = clip.id;
+    print('[ThumbnailCache] extractThumbnails called for clip: ${clip.name}, id: $clipId, count: $thumbnailCount');
 
     // Return cached thumbnails if available
     if (_thumbnailCache.containsKey(clipId)) {
+      print('[ThumbnailCache] Returning cached thumbnails for $clipId');
       return _thumbnailCache[clipId]!;
     }
 
     // Wait for pending extraction
     if (_pendingExtractions.containsKey(clipId)) {
+      print('[ThumbnailCache] Waiting for pending extraction for $clipId');
       return _pendingExtractions[clipId]!.future;
     }
 
     // Start new extraction
+    print('[ThumbnailCache] Starting new extraction for $clipId');
     final completer = Completer<List<Uint8List>>();
     _pendingExtractions[clipId] = completer;
 
     try {
+      print('[ThumbnailCache] Calling platform_thumbnail.extractThumbnails...');
       final thumbnails = await platform_thumbnail.extractThumbnails(
         clip: clip,
         thumbnailCount: thumbnailCount,
         thumbnailHeight: thumbnailHeight,
       );
+      print('[ThumbnailCache] Extraction complete: ${thumbnails.length} thumbnails');
       _thumbnailCache[clipId] = thumbnails;
       completer.complete(thumbnails);
     } catch (e) {
-      print('Thumbnail extraction failed: $e');
+      print('[ThumbnailCache] Extraction FAILED: $e');
       completer.complete([]); // Return empty list on error
     } finally {
       _pendingExtractions.remove(clipId);

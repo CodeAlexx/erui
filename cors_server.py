@@ -5,16 +5,25 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 import os
 
 class CORSRequestHandler(SimpleHTTPRequestHandler):
-    def end_headers(self):
-        # Add CORS headers to allow cross-origin access
+    def send_cors_headers(self):
+        """Send CORS headers to allow cross-origin access."""
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', '*')
+        self.send_header('Access-Control-Max-Age', '86400')  # Cache preflight for 24 hours
+
+    def end_headers(self):
+        self.send_cors_headers()
         super().end_headers()
 
     def do_OPTIONS(self):
+        """Handle preflight CORS requests."""
         self.send_response(200)
-        self.end_headers()
+        self.send_cors_headers()
+        self.send_header('Content-Length', '0')
+        self.send_header('Content-Type', 'text/plain')
+        # Must call parent's end_headers to avoid double CORS headers
+        SimpleHTTPRequestHandler.end_headers(self)
 
 if __name__ == '__main__':
     os.chdir('/home/alex/eriui')

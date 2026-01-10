@@ -8,5 +8,6 @@ Future<List<Uint8List>> extractThumbnails({
   required int thumbnailCount,
   required int thumbnailHeight,
 }) async {
+  print('[STUB] ERROR: Stub thumbnail implementation called! Platform detection failed.');
   throw UnsupportedError('Platform not supported for thumbnail extraction');
 }

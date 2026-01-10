@@ -308,8 +308,14 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
 
   /// Build thumbnail preview with actual video frames
   Widget _buildThumbnailPreview(Color clipColor) {
+    // Triple logging to ensure we see the output somewhere
+    debugPrint('[ClipWidget] >>> _buildThumbnailPreview called for: ${widget.clip.name}, type: ${widget.clip.type}, sourcePath: ${widget.clip.sourcePath}');
+    print('PRINT: [ClipWidget] >>> _buildThumbnailPreview called');
+    
     // Only video clips get frame thumbnails
     if (widget.clip.type != ClipType.video || widget.clip.sourcePath == null) {
+      debugPrint('[ClipWidget] Skipping thumbnails - not a video clip or no sourcePath');
+      print('PRINT: Skipping thumbnails');
       return Opacity(
         opacity: 0.15,
         child: CustomPaint(
@@ -320,6 +326,9 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
         ),
       );
     }
+    
+    debugPrint('[ClipWidget] Video clip detected, requesting thumbnails...');
+    print('PRINT: [ClipWidget] Video clip detected!');
 
     // Calculate how many thumbnails to show based on clip width
     final thumbnailCount = ClipThumbnailCache.getThumbnailCount(_clipWidth);
@@ -331,6 +340,7 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
 
     return thumbnailsAsync.when(
       data: (thumbnails) {
+        print('[ClipWidget] Got ${thumbnails.length} thumbnails for ${widget.clip.name}');
         if (thumbnails.isEmpty) {
           return _buildPlaceholderPattern();
         }
@@ -348,19 +358,25 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
               .toList(),
         );
       },
-      loading: () => Stack(
-        children: [
-          _buildPlaceholderPattern(),
-          const Center(
-            child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+      loading: () {
+        print('[ClipWidget] Loading thumbnails for ${widget.clip.name}...');
+        return Stack(
+          children: [
+            _buildPlaceholderPattern(),
+            const Center(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+              ),
             ),
-          ),
-        ],
-      ),
-      error: (_, __) => _buildPlaceholderPattern(),
+          ],
+        );
+      },
+      error: (error, stack) {
+        print('[ClipWidget] ERROR extracting thumbnails for ${widget.clip.name}: $error');
+        return _buildPlaceholderPattern();
+      },
     );
   }
 
