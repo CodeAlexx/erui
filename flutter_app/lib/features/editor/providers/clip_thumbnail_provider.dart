@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +10,13 @@ import '../models/editor_models.dart';
 import 'clip_thumbnail_stub.dart'
     if (dart.library.io) 'clip_thumbnail_native.dart'
     if (dart.library.html) 'clip_thumbnail_web.dart' as platform_thumbnail;
+
+// Debug: print platform at startup
+final _platformInit = () {
+  print('[ThumbnailProvider] Platform: ${Platform.operatingSystem}');
+  print('[ThumbnailProvider] Using native implementation: dart.library.io available');
+  return true;
+}();
 
 // =============================================================================
 // AI TESTING NOTES:

@@ -8,6 +8,7 @@ import '../providers/editor_provider.dart';
 import '../providers/media_browser_provider.dart';
 import '../../gallery/widgets/gallery_drag_source.dart';
 import 'media_browser_panel.dart';
+import 'clip_widget.dart';
 
 /// Main timeline widget for the video editor.
 /// Displays tracks stacked vertically with horizontally scrollable clips.
@@ -621,14 +622,11 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
             top: trackOffset,
             width: math.max(width, 20), // Minimum visible width
             height: trackHeight - 4, // Leave some padding
-            child: _ClipWidget(
+            child: ClipWidget(
               clip: clip,
-              track: track,
+              pixelsPerSecond: project.zoomLevel,
               isSelected: isSelected,
-              colorScheme: colorScheme,
               onTap: () => widget.onClipTap?.call(clip),
-              onDragStart: (details) =>
-                  widget.onClipDragStart?.call(clip, details),
               onDragUpdate: (details) =>
                   widget.onClipDragUpdate?.call(clip, details),
               onDragEnd: (details) =>
