@@ -370,9 +370,10 @@ class CaptionService:
             if skip_existing and os.path.exists(txt_path):
                 skipped += 1
                 yield {
-                    "type": "skipped", 
-                    "filename": rel_path, 
+                    "type": "skipped",
+                    "filename": rel_path,
                     "progress": (idx + 1) / total,
+                    "total": total,
                     "stats": {"processed": processed, "skipped": skipped, "failed": failed}
                 }
                 continue
@@ -393,6 +394,7 @@ class CaptionService:
                     "filename": rel_path,
                     "caption": caption,
                     "progress": (idx + 1) / total,
+                    "total": total,
                     "stats": {"processed": processed, "skipped": skipped, "failed": failed}
                 }
                 
@@ -404,6 +406,7 @@ class CaptionService:
                     "filename": rel_path,
                     "error": str(e),
                     "progress": (idx + 1) / total,
+                    "total": total,
                     "stats": {"processed": processed, "skipped": skipped, "failed": failed}
                 }
 
