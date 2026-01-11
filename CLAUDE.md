@@ -1,228 +1,166 @@
-# CLAUDE.md - EriUI Project Guide
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## CRITICAL: How to Launch EriUI
+
+**ALWAYS use the server manager to start EriUI. NEVER launch SwarmUI, OneTrainer, or ComfyUI directly.**
+
+```bash
+cd /home/alex/eriui
+
+# Start EriUI (desktop mode) - THIS IS THE CORRECT WAY
+python server_manager.py start
+
+# Or use interactive menu
+python server_manager.py
+
+# Check status
+python server_manager.py status
+
+# Stop all services
+python server_manager.py stop
+```
+
+This starts:
+1. EriUI's own ComfyUI backend (port 8199)
+2. OneTrainer web UI (port 8100)
+3. Flutter desktop app
+
+**When working on EriUI**, use server_manager.py - don't launch SwarmUI or OneTrainer separately unless specifically asked.
 
 ## Project Overview
 
-**EriUI** is a unified AI media creation suite built with Flutter, combining:
-- **Image Generation** (SwarmUI-style interface clone)
-- **Video Generation** (with built-in video editor)
-- **Model Training** (OneTrainer integration)
-- **Workflow Management** (ComfyUI workflow browser and visual editor)
+**EriUI** is a production-grade, power-user AI media suite built with Flutter. All-in-one application for the complete AI image/video workflow.
 
-It's a desktop-first application with web mode support, featuring its own ComfyUI backend instance.
+**Capabilities:**
+- **Inference** - SwarmUI-style generate screen with own ComfyUI backend
+- **Training** - Embedded OneTrainer web UI (`/home/alex/OneTrainer`)
+- **Video Editor** - Timeline-based editing with FFmpeg integration
+- **Captioner** - Qwen Instruct for image/video captioning
+- **Video Prep** - Dataset preparation tools for video training
+- **Workflow System** - ComfyUI workflow browser and visual node editor
 
-## Architecture
-
-```
-eriui/
-├── flutter_app/          # Main Flutter application
-├── comfyui/              # Dedicated ComfyUI backend instance
-│   └── ComfyUI/          # ComfyUI installation (port 8199)
-├── server_manager.py     # Service orchestration tool
-├── cors_server.py        # CORS proxy (web mode only)
-└── CLAUDE.md             # This file
-```
+Desktop-first with web mode support.
 
 ## Services & Ports
 
-| Service | Port | Description |
-|---------|------|-------------|
-| ComfyUI | 8199 | Image/video generation backend (eriui's own instance) |
-| OneTrainer | 8100 | Model training backend (external, at /home/alex/OneTrainer) |
-| CORS Server | 8899 | HTTP proxy with CORS headers (web mode only) |
-| Flutter App | - | Desktop app (Linux) or web app (Chrome) |
+| Service | Port | Location | Mode |
+|---------|------|----------|------|
+| ComfyUI | 8199 | `/home/alex/eriui/comfyui/ComfyUI` | Both |
+| OneTrainer | 8100 | `/home/alex/OneTrainer` | Both |
+| EriUI Server | 7802 | `/home/alex/eriui/bin/server.dart` | Web only |
+| CORS Server | 8899 | `/home/alex/eriui/cors_server.py` | Web only |
+| Workflow API | 7803 | ComfyUI workflow system | Both |
 
-## Server Manager
-
-Located at `/home/alex/eriui/server_manager.py`
-
-```bash
-# Interactive menu
-python server_manager.py
-
-# Desktop mode (default) - starts ComfyUI, OneTrainer, Flutter
-python server_manager.py start
-
-# Web mode - adds CORS server, uses Chrome
-python server_manager.py start --web
-
-# Other commands
-python server_manager.py stop      # Stop all services
-python server_manager.py status    # Show service status
-python server_manager.py restart   # Restart all
-python server_manager.py logs <service>  # View logs
-```
-
-## Flutter App Structure
-
-```
-flutter_app/lib/
-├── main.dart                 # App entry point
-├── app.dart                  # Router configuration (GoRouter)
-├── features/                 # Feature modules
-│   ├── generate/             # Image generation (SwarmUI clone)
-│   ├── editor/               # Video editor
-│   ├── trainer/              # OneTrainer integration UI
-│   ├── models/               # Model browser/manager
-│   ├── gallery/              # Generated images gallery
-│   ├── workflow_browser/     # Workflow management UI
-│   ├── workflow_editor/      # Visual node editor
-│   ├── comfyui_editor/       # External ComfyUI launcher
-│   ├── settings/             # User preferences
-│   ├── tools/                # Utilities (batch, grid, etc.)
-│   ├── regional/             # Regional prompting
-│   └── wildcards/            # Wildcard management
-├── providers/                # Riverpod state management
-├── services/                 # API & business logic
-├── models/                   # Data models
-├── widgets/                  # Shared UI components
-└── theme/                    # Design system
-```
-
-## Key Services
-
-### ComfyUI Service (`lib/services/comfyui_service.dart`)
-- Connects to ComfyUI backend on port 8199
-- WebSocket for real-time progress updates
-- Queues prompts, manages history, fetches models
-
-### OneTrainer Service (`lib/services/onetrainer_service.dart`)
-- Connects to OneTrainer Web UI on port 8100
-- Training management, dataset handling
-- Real-time training progress via WebSocket
-
-### Workflow Services
-- `workflow_storage_service.dart` - Hive-based workflow persistence
-- `comfyui_workflow_api.dart` - Template filling, workflow execution
-- `workflow_validation_service.dart` - Workflow structure validation
-
-### Other Services
-- `comfyui_workflow_builder.dart` - Builds ComfyUI workflows from params
-- `generation_queue_service.dart` - Local generation queue
-- `storage_service.dart` - Hive local storage (settings, state)
-- `autocomplete_service.dart` - Prompt tag autocomplete
-- `presets_service.dart` - Parameter preset management
-
-## State Management
-
-Uses **Riverpod** for state management:
-
-### Key Providers
-- `generationProvider` - Generation parameters and state
-- `sessionProvider` - ComfyUI connection state
-- `modelsProvider` - Available models list
-- `loraProvider` - LoRA models
-- `workflowProvider` - Workflow list and selection
-- `workflowExecutionProvider` - Workflow execution state
-- `panelStateProvider` - UI panel expansion states
-
-## Features Detail
-
-### Generate Screen (SwarmUI Clone)
-- Three-panel layout: Parameters | Preview | Metadata
-- Collapsible parameter sections
-- Workflow browser integration
-- LoRA/ControlNet/VAE support
-- Batch generation, grid generation
-
-### Video Editor
-- Timeline with clip thumbnails
-- Media playback with seeking
-- Multiple tracks support
-- FFmpeg-based thumbnail extraction
-
-### Trainer (OneTrainer)
-- Dashboard with GPU stats
-- Training configuration
-- Dataset management
-- Real-time loss charts
-- Preset management
-
-### Workflow System (SwarmUI Parity)
-- Workflow browser with folder hierarchy
-- Custom parameter definitions
-- Template tags: `${prompt}`, `${seed}`, `${model}`, etc.
-- Visual node editor
-- Import/export ComfyUI JSON
-
-## Data Storage
-
-- **Hive** - Local key-value storage (`/home/alex/Documents/eriui_storage`)
-- **Workflows** - Stored in Hive with JSON serialization
-- **Settings** - User preferences in Hive
-- **Generated Images** - ComfyUI output directory
-
-## Dependencies
-
-Key Flutter packages:
-- `flutter_riverpod` - State management
-- `go_router` - Navigation
-- `dio` - HTTP client
-- `web_socket_channel` - WebSocket connections
-- `hive_flutter` - Local storage
-- `media_kit` - Video playback
-- `file_picker` - File selection
-
-## Build & Run
+## Build Commands (Flutter App Only)
 
 ```bash
 cd /home/alex/eriui/flutter_app
 
-# Run desktop (recommended)
+# Run desktop app (if not using server_manager)
 flutter run -d linux
-
-# Run web
-flutter run -d chrome
 
 # Build release
 flutter build linux --release
+
+# Run tests
+flutter test
+
+# Analyze code
+flutter analyze
+
+# Get dependencies
+flutter pub get
+
+# Generate code (Riverpod generators, Hive adapters)
+dart run build_runner build --delete-conflicting-outputs
 ```
 
-## External Dependencies
+## Architecture
 
-### ComfyUI Backend
-- Location: `/home/alex/eriui/comfyui/ComfyUI`
-- Virtual env: `venv/`
-- Custom nodes: ComfyUI-Manager, ComfyUI-VideoHelperSuite, ComfyUI-LTXVideo
-- Model paths linked to `/home/alex/SwarmUI/Models/`
+### State Management Pattern
 
-### OneTrainer
-- Location: `/home/alex/OneTrainer`
-- Web UI: `/home/alex/OneTrainer/web_ui/`
-- Virtual env: `venv/`
+Uses **Riverpod** with StateNotifier pattern throughout:
 
-## Common Tasks
+```dart
+// Provider definition in lib/providers/
+final myProvider = StateNotifierProvider<MyNotifier, MyState>((ref) {
+  return MyNotifier(ref);
+});
 
-### Adding a new feature
-1. Create feature folder in `lib/features/<name>/`
-2. Add screen widget, providers, widgets
-3. Register route in `lib/app.dart`
-4. Add navigation in `lib/widgets/app_shell.dart`
+class MyNotifier extends StateNotifier<MyState> {
+  final Ref _ref;
+  MyNotifier(this._ref) : super(MyState.initial());
+}
+```
 
-### Adding a new service
-1. Create service in `lib/services/<name>_service.dart`
-2. Add Riverpod provider
-3. Initialize in `main.dart` if needed
+### Feature Module Structure
 
-### Modifying workflow system
+Each feature in `lib/features/<name>/` follows:
+- `<name>_screen.dart` - Main screen widget
+- `widgets/` - Feature-specific widgets
+- `providers/` - Feature-specific state (optional, most in `lib/providers/`)
+
+### Service Layer
+
+Services in `lib/services/` handle business logic and external APIs:
+- `comfyui_service.dart` - WebSocket + REST API to ComfyUI backend
+- `onetrainer_service.dart` - Training management API
+- `workflow_storage_service.dart` - Hive-based workflow persistence
+- `comfyui_workflow_api.dart` - Workflow template execution
+
+### Routing
+
+GoRouter with ShellRoute in `lib/app.dart`. All routes wrapped in `AppShell` for consistent navigation.
+
+### Data Persistence
+
+Hive for local storage:
+- Storage directory: `/home/alex/Documents/eriui_storage`
+- Initialize in `main.dart` before `runApp()`
+- Workflows stored as JSON in Hive boxes
+
+## Key Patterns
+
+### Adding a New Feature
+
+1. Create `lib/features/<name>/<name>_screen.dart`
+2. Register route in `lib/app.dart` under `ShellRoute.routes`
+3. Add navigation item in `lib/widgets/app_shell.dart`
+4. Add provider in `lib/providers/` if needed
+
+### Adding a New Service
+
+1. Create `lib/services/<name>_service.dart`
+2. Add initialization in `main.dart` if async setup required
+3. Create provider to expose service via Riverpod
+
+### Workflow System
+
+ComfyUI workflows use template tags for parameter injection:
+- `${prompt}`, `${negative_prompt}` - Text prompts
+- `${seed}`, `${steps}`, `${cfg}` - Generation params
+- `${width}`, `${height}` - Dimensions
+- `${model}`, `${vae}`, `${sampler}` - Model selection
+
+Key files:
 - Models: `lib/models/workflow_models.dart`
-- Storage: `lib/services/workflow_storage_service.dart`
-- API: `lib/services/comfyui_workflow_api.dart`
-- UI: `lib/features/workflow_browser/`
+- Validation: `lib/services/workflow_validation_service.dart`
+- Execution: `lib/services/comfyui_workflow_api.dart`
 
 ## Important Notes
 
-- **SwarmUI is read-only** - Don't modify SwarmUI code, only reference it
-- **eriui has its own ComfyUI** - Uses port 8199, not SwarmUI's backend
+- **Own ComfyUI backend** - EriUI runs its own ComfyUI instance on port 8199 (not shared with other tools)
+- **OneTrainer web UI** - Embedded as the working training interface at `/home/alex/OneTrainer` (kept as fallback and primary training)
+- **SwarmUI is read-only** - `/home/alex/SwarmUI/` and its ComfyUI backend are reference only, do not modify
 - **Desktop-first** - CORS server only needed for web mode
-- **Riverpod patterns** - Follow existing StateNotifier patterns
+- **Models directory** - ComfyUI models at `/home/alex/eriui/comfyui/ComfyUI/models/` (symlinked to shared location)
 
-## Git Workflow
+## Git
 
+Local repository only (no remote). Standard workflow:
 ```bash
-cd /home/alex/eriui
-git status
 git add -A
 git commit -m "Description"
 ```
-
-Repository is local (not pushed to remote).

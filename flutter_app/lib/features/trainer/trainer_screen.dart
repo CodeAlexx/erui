@@ -35,14 +35,16 @@ class ModelOption {
   });
 }
 
+/// Base path for EriUI's ComfyUI models
+const _modelsBase = '/home/alex/eriui/comfyui/ComfyUI/models';
+
 final modelOptions = [
-  ModelOption(value: 'flux_dev', label: 'FLUX Dev', path: '/home/alex/SwarmUI/Models/diffusion_models/flux1-dev.safetensors', category: 'Image'),
-  ModelOption(value: 'flux_schnell', label: 'FLUX Schnell', path: '/home/alex/SwarmUI/Models/diffusion_models/flux_schnell.safetensors', category: 'Image'),
-  ModelOption(value: 'sdxl', label: 'SDXL', path: '/home/alex/SwarmUI/Models/Stable-Diffusion/sdxl.safetensors', category: 'Image'),
-  ModelOption(value: 'sd_35', label: 'SD 3.5', path: '/home/alex/SwarmUI/Models/diffusion_models/sd3.5_large.safetensors', category: 'Image'),
-  ModelOption(value: 'z_image', label: 'Z-Image', path: '/home/alex/SwarmUI/Models/diffusion_models/z_image_de_turbo_v1_bf16.safetensors', category: 'Image'),
-  ModelOption(value: 'wan_t2v_high', label: 'Wan 2.2 T2V (High)', path: '/home/alex/SwarmUI/Models/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors', category: 'Video'),
-  ModelOption(value: 'wan_i2v_high', label: 'Wan 2.2 I2V (High)', path: '/home/alex/SwarmUI/Models/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors', category: 'Video'),
+  ModelOption(value: 'flux_dev', label: 'FLUX Dev', path: '$_modelsBase/diffusion_models/flux1-dev.safetensors', category: 'Image'),
+  ModelOption(value: 'sdxl', label: 'SDXL', path: '$_modelsBase/checkpoints/OfficialStableDiffusion/sd_xl_base_1.0.safetensors', category: 'Image'),
+  ModelOption(value: 'sd_35', label: 'SD 3.5', path: '$_modelsBase/diffusion_models/sd3.5_large.safetensors', category: 'Image'),
+  ModelOption(value: 'z_image', label: 'Z-Image', path: '$_modelsBase/diffusion_models/z_image_de_turbo_v1_bf16.safetensors', category: 'Image'),
+  ModelOption(value: 'wan_t2v_high', label: 'Wan 2.2 T2V (High)', path: '$_modelsBase/diffusion_models/wan2.2_t2v_high_noise_14B_fp16.safetensors', category: 'Video'),
+  ModelOption(value: 'wan_i2v_high', label: 'Wan 2.2 I2V (High)', path: '$_modelsBase/diffusion_models/wan2.2_i2v_high_noise_14B_fp16.safetensors', category: 'Video'),
   ModelOption(value: 'kandinsky_5_video', label: 'Kandinsky 5 T2V', path: 'kandinskylab/Kandinsky-5.0-T2V-Lite-sft-5s', category: 'Video'),
 ];
 

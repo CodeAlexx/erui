@@ -38,6 +38,9 @@ enum CaptionFormat {
 
 /// Backend type for captioning
 enum CaptionBackend {
+  /// OneTrainer Qwen VL captioning (recommended)
+  qwen,
+
   /// Local SwarmUI captioning endpoint
   local,
 
@@ -74,15 +77,19 @@ class CaptionSettings {
   /// Whether to include filename hints in caption prompt
   final bool useFilenameHints;
 
+  /// Prompt for Qwen captioning
+  final String captionPrompt;
+
   const CaptionSettings({
-    this.apiEndpoint = 'http://localhost:7801',
-    this.modelName = 'default',
-    this.maxLength = 200,
+    this.apiEndpoint = 'http://localhost:8100',
+    this.modelName = 'Qwen/Qwen2.5-VL-7B-Instruct',
+    this.maxLength = 256,
     this.prefix = '',
     this.suffix = '',
-    this.backend = CaptionBackend.placeholder,
-    this.timeoutSeconds = 60,
+    this.backend = CaptionBackend.qwen,
+    this.timeoutSeconds = 120,
     this.useFilenameHints = false,
+    this.captionPrompt = 'Describe this image in detail.',
   });
 
   CaptionSettings copyWith({
@@ -94,6 +101,7 @@ class CaptionSettings {
     CaptionBackend? backend,
     int? timeoutSeconds,
     bool? useFilenameHints,
+    String? captionPrompt,
   }) {
     return CaptionSettings(
       apiEndpoint: apiEndpoint ?? this.apiEndpoint,
@@ -104,6 +112,7 @@ class CaptionSettings {
       backend: backend ?? this.backend,
       timeoutSeconds: timeoutSeconds ?? this.timeoutSeconds,
       useFilenameHints: useFilenameHints ?? this.useFilenameHints,
+      captionPrompt: captionPrompt ?? this.captionPrompt,
     );
   }
 
@@ -117,22 +126,24 @@ class CaptionSettings {
       'backend': backend.name,
       'timeoutSeconds': timeoutSeconds,
       'useFilenameHints': useFilenameHints,
+      'captionPrompt': captionPrompt,
     };
   }
 
   factory CaptionSettings.fromJson(Map<String, dynamic> json) {
     return CaptionSettings(
-      apiEndpoint: json['apiEndpoint'] as String? ?? 'http://localhost:7801',
-      modelName: json['modelName'] as String? ?? 'default',
-      maxLength: json['maxLength'] as int? ?? 200,
+      apiEndpoint: json['apiEndpoint'] as String? ?? 'http://localhost:8100',
+      modelName: json['modelName'] as String? ?? 'Qwen/Qwen2.5-VL-7B-Instruct',
+      maxLength: json['maxLength'] as int? ?? 256,
       prefix: json['prefix'] as String? ?? '',
       suffix: json['suffix'] as String? ?? '',
       backend: CaptionBackend.values.firstWhere(
         (b) => b.name == json['backend'],
-        orElse: () => CaptionBackend.placeholder,
+        orElse: () => CaptionBackend.qwen,
       ),
-      timeoutSeconds: json['timeoutSeconds'] as int? ?? 60,
+      timeoutSeconds: json['timeoutSeconds'] as int? ?? 120,
       useFilenameHints: json['useFilenameHints'] as bool? ?? false,
+      captionPrompt: json['captionPrompt'] as String? ?? 'Describe this image in detail.',
     );
   }
 }
@@ -283,6 +294,8 @@ class CaptionService {
 
     try {
       switch (_settings.backend) {
+        case CaptionBackend.qwen:
+          return _captionQwen(imagePath);
         case CaptionBackend.placeholder:
           return _captionPlaceholder(imagePath);
         case CaptionBackend.local:
@@ -309,6 +322,76 @@ class CaptionService {
     final fullCaption = _applyPrefixSuffix(caption);
     _log('Placeholder caption: $fullCaption');
     return CaptionResult.success(fullCaption);
+  }
+
+  /// OneTrainer Qwen VL captioning - uses file path directly
+  Future<CaptionResult> _captionQwen(String imagePath) async {
+    _log('Calling OneTrainer Qwen captioning endpoint');
+
+    try {
+      // First check if model is loaded
+      final stateResponse = await _dio.get(
+        '${_settings.apiEndpoint}/caption/state',
+      );
+
+      if (stateResponse.statusCode == 200) {
+        final stateData = stateResponse.data as Map<String, dynamic>;
+        final isLoaded = stateData['loaded'] as bool? ?? false;
+
+        if (!isLoaded) {
+          // Load the model first
+          _log('Loading Qwen model: ${_settings.modelName}');
+          final loadResponse = await _dio.post(
+            '${_settings.apiEndpoint}/caption/load',
+            data: {
+              'model_id': _settings.modelName,
+              'quantization': '8-bit',
+              'attn_impl': 'flash_attention_2',
+            },
+          );
+
+          if (loadResponse.statusCode != 200) {
+            return CaptionResult.failure('Failed to load Qwen model');
+          }
+          _log('Qwen model loaded successfully');
+        }
+      }
+
+      // Generate caption - OneTrainer uses file path directly (not base64!)
+      final response = await _dio.post(
+        '${_settings.apiEndpoint}/caption/generate',
+        data: {
+          'media_path': imagePath,
+          'prompt': _settings.captionPrompt,
+          'max_tokens': _settings.maxLength,
+          'resolution_mode': 'auto',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = response.data as Map<String, dynamic>;
+        String caption = data['caption'] as String? ?? '';
+
+        if (caption.isEmpty) {
+          return CaptionResult.failure('Empty caption returned from Qwen');
+        }
+
+        final fullCaption = _applyPrefixSuffix(caption);
+        _log('Qwen caption result: ${fullCaption.substring(0, fullCaption.length.clamp(0, 50))}...');
+        return CaptionResult.success(fullCaption);
+      }
+
+      return CaptionResult.failure('Qwen API returned status ${response.statusCode}');
+    } on DioException catch (e) {
+      _logError('Qwen captioning failed', e);
+      if (e.type == DioExceptionType.connectionError) {
+        return CaptionResult.failure(
+          'Cannot connect to OneTrainer caption service at ${_settings.apiEndpoint}. '
+          'Make sure EriUI is started with: python server_manager.py start'
+        );
+      }
+      return CaptionResult.failure(e.message ?? 'Network error');
+    }
   }
 
   /// Local SwarmUI captioning
@@ -684,14 +767,80 @@ class CaptionService {
     }
 
     try {
-      final response = await _dio.get(
-        _settings.backend == CaptionBackend.local
-            ? '/API/GetServerInfo'
-            : '/health',
-      );
+      String endpoint;
+      switch (_settings.backend) {
+        case CaptionBackend.qwen:
+          endpoint = '${_settings.apiEndpoint}/caption/state';
+          break;
+        case CaptionBackend.local:
+          endpoint = '${_settings.apiEndpoint}/API/GetServerInfo';
+          break;
+        default:
+          endpoint = '${_settings.apiEndpoint}/health';
+      }
+
+      final response = await _dio.get(endpoint);
       return response.statusCode == 200;
     } catch (e) {
       _logError('Connection test failed', e);
+      return false;
+    }
+  }
+
+  /// Check if Qwen model is loaded
+  Future<Map<String, dynamic>> getQwenState() async {
+    if (_settings.backend != CaptionBackend.qwen) {
+      return {'loaded': false, 'error': 'Not using Qwen backend'};
+    }
+
+    try {
+      final response = await _dio.get('${_settings.apiEndpoint}/caption/state');
+      if (response.statusCode == 200) {
+        return response.data as Map<String, dynamic>;
+      }
+      return {'loaded': false, 'error': 'API error'};
+    } catch (e) {
+      return {'loaded': false, 'error': e.toString()};
+    }
+  }
+
+  /// Load Qwen model explicitly
+  Future<bool> loadQwenModel({
+    String? modelId,
+    String quantization = '8-bit',
+  }) async {
+    if (_settings.backend != CaptionBackend.qwen) {
+      return false;
+    }
+
+    try {
+      _log('Loading Qwen model: ${modelId ?? _settings.modelName}');
+      final response = await _dio.post(
+        '${_settings.apiEndpoint}/caption/load',
+        data: {
+          'model_id': modelId ?? _settings.modelName,
+          'quantization': quantization,
+          'attn_impl': 'flash_attention_2',
+        },
+      );
+      return response.statusCode == 200;
+    } catch (e) {
+      _logError('Failed to load Qwen model', e);
+      return false;
+    }
+  }
+
+  /// Unload Qwen model to free VRAM
+  Future<bool> unloadQwenModel() async {
+    if (_settings.backend != CaptionBackend.qwen) {
+      return false;
+    }
+
+    try {
+      final response = await _dio.post('${_settings.apiEndpoint}/caption/unload');
+      return response.statusCode == 200;
+    } catch (e) {
+      _logError('Failed to unload Qwen model', e);
       return false;
     }
   }

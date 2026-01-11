@@ -79,6 +79,19 @@ SERVICES = {
         optional=True,
         description="Only needed for web mode",
     ),
+    "eri-server": Service(
+        name="eri-server",
+        port=7802,
+        start_cmd=[
+            str(FLUTTER_BIN).replace("flutter", "dart"), "run", "bin/server.dart",
+            "--port=7802",
+            "--comfy-url=http://localhost:8199",
+            "--trainer-url=http://localhost:8100",
+        ],
+        cwd=ERIUI_DIR,
+        optional=True,
+        description="Dart middleware for web mode",
+    ),
     "flutter": Service(
         name="flutter",
         port=0,  # Flutter doesn't bind a specific port we manage
@@ -338,10 +351,10 @@ def start_all(web_mode: bool = False):
     ensure_dirs()
 
     if web_mode:
-        # Web mode: cors + comfyui + onetrainer + flutter-web
-        order = ["cors", "comfyui", "onetrainer", "flutter-web"]
+        # Web mode: cors + comfyui + onetrainer + eri-server + flutter-web
+        order = ["cors", "comfyui", "onetrainer", "eri-server", "flutter-web"]
     else:
-        # Desktop mode: comfyui + onetrainer + flutter (no CORS needed)
+        # Desktop mode: comfyui + onetrainer + flutter (no CORS or eri-server needed)
         order = ["comfyui", "onetrainer", "flutter"]
 
     for name in order:
@@ -356,8 +369,8 @@ def stop_all():
     """Stop all services (both desktop and web)"""
     print(colored("\nStopping all services...\n", Colors.BOLD))
 
-    # Stop in reverse order (includes both flutter variants)
-    order = ["flutter", "flutter-web", "onetrainer", "comfyui", "cors"]
+    # Stop in reverse order (includes both flutter variants and eri-server)
+    order = ["flutter", "flutter-web", "eri-server", "onetrainer", "comfyui", "cors"]
 
     for name in order:
         if name in SERVICES:

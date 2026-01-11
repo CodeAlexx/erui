@@ -98,6 +98,7 @@ async def start_batch(req: BatchProcessRequest, background_tasks: BackgroundTask
     batch_status["active"] = True
     batch_status["stats"] = {"processed": 0, "skipped": 0, "failed": 0}
     batch_status["progress"] = 0
+    batch_status["total"] = 0
     batch_status["current_file"] = None
     batch_status["last_caption"] = None
     
@@ -117,7 +118,8 @@ async def get_batch_status():
         "stats": batch_status.get("stats", {"processed": 0, "skipped": 0, "failed": 0}),
         "current_file": batch_status.get("current_file"),
         "last_caption": batch_status.get("last_caption"),
-        "progress": batch_status.get("progress", 0)
+        "progress": batch_status.get("progress", 0),
+        "total": batch_status.get("total", 0)
     }
 
 
@@ -179,6 +181,8 @@ def _run_batch_sync():
             
             if "progress" in update:
                 batch_status["progress"] = update["progress"]
+            if "total" in update:
+                batch_status["total"] = update["total"]
                 
     except Exception as e:
         print(f"Batch job error: {e}")
