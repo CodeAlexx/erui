@@ -8,6 +8,17 @@ build/
 .flutter-plugins*
 .packages
 
+# Model weights and large files
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+models/
+weights/
+checkpoints/
+
 # OneTrainer excludes
 onetrainer/venv/
 onetrainer/**/__pycache__/
