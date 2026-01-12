@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'models/editor_models.dart';
+import 'services/web_playback_controller.dart';
 import 'providers/editor_provider.dart';
 import 'providers/undo_system.dart';
 import 'services/playback_controller.dart';
@@ -431,7 +433,34 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
     final editorState = ref.watch(editorProjectProvider);
     final project = editorState.project;
     final playbackState = ref.watch(playbackStateProvider);
-    final videoController = ref.watch(videoControllerProvider);
+    
+    // Use platform-specific video widget and callbacks
+    Widget videoWidget;
+    VoidCallback? onPlay;
+    VoidCallback? onPause;
+    VoidCallback? onStop;
+    VoidCallback? onStepForward;
+    VoidCallback? onStepBackward;
+    
+    if (kIsWeb) {
+      // On web, use video_player package
+      videoWidget = const WebVideoPlayerWidget();
+      final webController = ref.read(webPlaybackControllerProvider);
+      onPlay = () => webController.play();
+      onPause = () => webController.pause();
+      onStop = () => webController.stop();
+      onStepForward = () => webController.stepFrame(1);
+      onStepBackward = () => webController.stepFrame(-1);
+    } else {
+      // On desktop, use media_kit
+      final videoController = ref.watch(videoControllerProvider);
+      videoWidget = Video(controller: videoController);
+      onPlay = () => ref.read(playbackControllerProvider).play();
+      onPause = () => ref.read(playbackControllerProvider).pause();
+      onStop = () => ref.read(playbackControllerProvider).stop();
+      onStepForward = () => ref.read(playbackControllerProvider).stepFrame(1);
+      onStepBackward = () => ref.read(playbackControllerProvider).stepFrame(-1);
+    }
 
     return Container(
       margin: const EdgeInsets.all(8),
@@ -441,19 +470,19 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
         border: Border.all(color: colorScheme.outlineVariant),
       ),
       child: PreviewPanel(
-        videoWidget: Video(controller: videoController),
+        videoWidget: videoWidget,
         currentTime: project.playheadPosition,
         duration: project.duration,
         isPlaying: playbackState == PlaybackState.playing,
         playbackSpeed: 1.0,
         volume: 1.0,
         isLooping: false,
-        onPlay: () => ref.read(playbackControllerProvider).play(),
-        onPause: () => ref.read(playbackControllerProvider).pause(),
-        onStop: () => ref.read(playbackControllerProvider).stop(),
+        onPlay: onPlay,
+        onPause: onPause,
+        onStop: onStop,
         onSeek: (time) => ref.read(editorProjectProvider.notifier).setPlayhead(time),
-        onStepForward: () => ref.read(playbackControllerProvider).stepFrame(1),
-        onStepBackward: () => ref.read(playbackControllerProvider).stepFrame(-1),
+        onStepForward: onStepForward,
+        onStepBackward: onStepBackward,
       ),
     );
   }
@@ -468,10 +497,14 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
       ),
       child: MediaBrowserPanel(
         onMediaDoubleClick: (media) {
+          print('DEBUG: onMediaDoubleClick called for ${media.fileName}');
           // Add clip to first video track at playhead position
           final editorState = ref.read(editorProjectProvider);
           final project = editorState.project;
-          if (project.tracks.isEmpty) return;
+          if (project.tracks.isEmpty) {
+            print('DEBUG: No tracks available');
+            return;
+          }
 
           // Find first video track
           final videoTrack = project.tracks.firstWhere(
@@ -484,6 +517,8 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
           final clipDuration = mediaDuration != null
               ? EditorTime.fromMilliseconds(mediaDuration.inMilliseconds)
               : EditorTime.fromSeconds(5);
+          
+          print('DEBUG: Adding clip with duration $clipDuration to track ${videoTrack.name}');
 
           // Create clip from media
           final clip = Clip(
@@ -496,6 +531,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
           );
 
           ref.read(editorProjectProvider.notifier).addClip(videoTrack.id, clip);
+          print('DEBUG: Clip added successfully');
         },
       ),
     );
@@ -654,7 +690,7 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
                   min: 0,
                   max: 1,
                   onChanged: (v) {
-                    // TODO: Update clip opacity
+                    ref.read(editorProjectProvider.notifier).setClipOpacity(clip.id, v);
                   },
                 ),
               ),
@@ -762,22 +798,22 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
             isSelected: false,
             onTap: () {},
             onNameChanged: (name) {
-              // TODO: Update track name
+              ref.read(editorProjectProvider.notifier).setTrackName(track.id, name);
             },
             onMuteChanged: (muted) {
-              // TODO: Update track mute
+              ref.read(editorProjectProvider.notifier).setTrackMuted(track.id, muted);
             },
             onSoloChanged: (solo) {
-              // TODO: Update track solo
+              ref.read(editorProjectProvider.notifier).setTrackSolo(track.id, solo);
             },
             onLockChanged: (locked) {
-              // TODO: Update track lock
+              ref.read(editorProjectProvider.notifier).setTrackLocked(track.id, locked);
             },
             onVisibilityChanged: (visible) {
-              // TODO: Update track visibility
+              ref.read(editorProjectProvider.notifier).setTrackVisible(track.id, visible);
             },
             onVolumeChanged: (volume) {
-              // TODO: Update track volume
+              ref.read(editorProjectProvider.notifier).setTrackVolume(track.id, volume);
             },
             onDelete: () {
               ref.read(editorProjectProvider.notifier).removeTrack(track.id);

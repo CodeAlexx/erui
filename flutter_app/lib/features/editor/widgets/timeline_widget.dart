@@ -475,11 +475,11 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                   child: Listener(
                     onPointerSignal: (event) =>
                         _handlePointerSignal(event, project),
-                    child: DragTarget<Object>(
+                child: DragTarget<Object>(
                       onWillAcceptWithDetails: (details) {
                         final data = details.data;
                         if (data is MediaDragData) {
-                          print('DEBUG: MediaDragData detected');
+                          print('DEBUG: MediaDragData will accept');
                           return true;
                         } else if (data is GalleryDragData) {
                           _updateDragHover(details.offset, data, project);
@@ -494,7 +494,7 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                         final localPosition = renderBox.globalToLocal(details.offset);
 
                         if (data is MediaDragData) {
-                          print('DEBUG: MediaDragData dropped');
+                          print('DEBUG: MediaDragData accepted at $localPosition');
                           _handleMediaDrop(data, localPosition, project);
                         } else if (data is GalleryDragData) {
                           _handleGalleryDrop(data, localPosition, project);
@@ -506,81 +506,86 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                       },
                       builder: (context, candidateData, rejectedData) {
                         final hasCandidateData = candidateData.isNotEmpty;
-                        return GestureDetector(
-                          onTapUp: (details) =>
-                              _handleBackgroundTap(details, project),
-                          onPanStart: _handlePanStart,
-                          onPanUpdate: _handlePanUpdate,
-                          onPanEnd: _handlePanEnd,
-                          child: SingleChildScrollView(
-                            controller: _horizontalScrollController,
-                            scrollDirection: Axis.horizontal,
+                        return Listener(
+                          onPointerSignal: (event) =>
+                              _handlePointerSignal(event, project),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTapUp: (details) =>
+                                _handleBackgroundTap(details, project),
+                            onPanStart: _handlePanStart,
+                            onPanUpdate: _handlePanUpdate,
+                            onPanEnd: _handlePanEnd,
                             child: SingleChildScrollView(
-                              controller: _verticalScrollController,
-                              child: SizedBox(
-                                width: totalWidth,
-                                height: totalHeight,
-                                child: Stack(
-                                  children: [
-                                    // Background grid
-                                    Positioned.fill(
-                                      child: CustomPaint(
-                                        painter: _TimelineGridPainter(
-                                          zoomLevel: project.zoomLevel,
-                                          duration: project.duration,
-                                          tracks: project.tracks,
-                                          colorScheme: colorScheme,
-                                        ),
-                                      ),
-                                    ),
-                                    // Track drop zone highlights (when dragging)
-                                    if (_isDragHovering && _dragData != null)
-                                      ..._buildTrackDropZones(project, colorScheme),
-                                    // Clips
-                                    ..._buildClips(project, selectedClipIds, colorScheme),
-                                    // Playhead
-                                    _Playhead(
-                                      position: project.playheadPosition,
-                                      zoomLevel: project.zoomLevel,
-                                      height: totalHeight,
-                                      color: colorScheme.primary,
-                                    ),
-                                    // In/Out markers
-                                    if (project.inPoint != null)
-                                      _RangeMarker(
-                                        position: project.inPoint!,
-                                        zoomLevel: project.zoomLevel,
-                                        height: totalHeight,
-                                        color: colorScheme.tertiary
-                                            .withOpacity(0.5),
-                                        isInPoint: true,
-                                      ),
-                                    if (project.outPoint != null)
-                                      _RangeMarker(
-                                        position: project.outPoint!,
-                                        zoomLevel: project.zoomLevel,
-                                        height: totalHeight,
-                                        color: colorScheme.tertiary
-                                            .withOpacity(0.5),
-                                        isInPoint: false,
-                                      ),
-                                    // Insertion point indicator (when dragging)
-                                    if (_isDragHovering && _dragHoverPosition != null && _dragData != null)
-                                      _buildInsertionIndicator(project, colorScheme),
-                                    // Ghost preview of where clip will land
-                                    if (_isDragHovering && _dragHoverPosition != null && _dragData != null)
-                                      _buildGhostPreview(project, colorScheme),
-                                    // Drop highlight overlay
-                                    if (hasCandidateData)
+                              controller: _horizontalScrollController,
+                              scrollDirection: Axis.horizontal,
+                              child: SingleChildScrollView(
+                                controller: _verticalScrollController,
+                                child: SizedBox(
+                                  width: totalWidth,
+                                  height: totalHeight,
+                                  child: Stack(
+                                    children: [
+                                      // Background grid
                                       Positioned.fill(
-                                        child: IgnorePointer(
-                                          child: Container(
-                                            color: colorScheme.primary
-                                                .withOpacity(0.05),
+                                        child: CustomPaint(
+                                          painter: _TimelineGridPainter(
+                                            zoomLevel: project.zoomLevel,
+                                            duration: project.duration,
+                                            tracks: project.tracks,
+                                            colorScheme: colorScheme,
                                           ),
                                         ),
                                       ),
-                                  ],
+                                      // Track drop zone highlights (when dragging)
+                                      if (_isDragHovering && _dragData != null)
+                                        ..._buildTrackDropZones(project, colorScheme),
+                                      // Clips
+                                      ..._buildClips(project, selectedClipIds, colorScheme),
+                                      // Playhead
+                                      _Playhead(
+                                        position: project.playheadPosition,
+                                        zoomLevel: project.zoomLevel,
+                                        height: totalHeight,
+                                        color: colorScheme.primary,
+                                      ),
+                                      // In/Out markers
+                                      if (project.inPoint != null)
+                                        _RangeMarker(
+                                          position: project.inPoint!,
+                                          zoomLevel: project.zoomLevel,
+                                          height: totalHeight,
+                                          color: colorScheme.tertiary
+                                              .withOpacity(0.5),
+                                          isInPoint: true,
+                                        ),
+                                      if (project.outPoint != null)
+                                        _RangeMarker(
+                                          position: project.outPoint!,
+                                          zoomLevel: project.zoomLevel,
+                                          height: totalHeight,
+                                          color: colorScheme.tertiary
+                                              .withOpacity(0.5),
+                                          isInPoint: false,
+                                        ),
+                                      // Insertion point indicator (when dragging)
+                                      if (_isDragHovering && _dragHoverPosition != null && _dragData != null)
+                                        _buildInsertionIndicator(project, colorScheme),
+                                      // Ghost preview of where clip will land
+                                      if (_isDragHovering && _dragHoverPosition != null && _dragData != null)
+                                        _buildGhostPreview(project, colorScheme),
+                                      // Drop highlight overlay
+                                      if (hasCandidateData)
+                                        Positioned.fill(
+                                          child: IgnorePointer(
+                                            child: Container(
+                                              color: colorScheme.primary
+                                                  .withOpacity(0.05),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -626,7 +631,12 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
               clip: clip,
               pixelsPerSecond: project.zoomLevel,
               isSelected: isSelected,
-              onTap: () => widget.onClipTap?.call(clip),
+              onTap: () {
+                // Select the clip in the editor state
+                ref.read(editorProjectProvider.notifier).selectClip(clip.id);
+                // Also call external handler if provided
+                widget.onClipTap?.call(clip);
+              },
               onDragUpdate: (details) =>
                   widget.onClipDragUpdate?.call(clip, details),
               onDragEnd: (details) =>

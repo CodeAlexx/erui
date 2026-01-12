@@ -713,6 +713,130 @@ class EditorProjectNotifier extends StateNotifier<EditorProjectState> {
       }
     }
   }
+
+  // ============================================================
+  // Track Property Updates
+  // ============================================================
+
+  /// Update track name
+  void setTrackName(EditorId trackId, String name) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.name = name;
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  /// Update track mute state
+  void setTrackMuted(EditorId trackId, bool muted) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.isMuted = muted;
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  /// Update track solo state
+  void setTrackSolo(EditorId trackId, bool solo) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.isSolo = solo;
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  /// Update track lock state
+  void setTrackLocked(EditorId trackId, bool locked) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.isLocked = locked;
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  /// Update track visibility
+  void setTrackVisible(EditorId trackId, bool visible) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.isVisible = visible;
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  /// Update track volume
+  void setTrackVolume(EditorId trackId, double volume) {
+    final project = _cloneProject();
+    final track = project.findTrack(trackId);
+    if (track == null) return;
+    
+    track.volume = volume.clamp(0.0, 2.0);
+    state = state.copyWith(project: project, isDirty: true);
+  }
+
+  // ============================================================
+  // Clip Property Updates
+  // ============================================================
+
+  /// Update clip opacity
+  void setClipOpacity(EditorId clipId, double opacity) {
+    final project = _cloneProject();
+    
+    for (final track in project.tracks) {
+      final clipIndex = track.clips.indexWhere((c) => c.id == clipId);
+      if (clipIndex != -1) {
+        track.clips[clipIndex] = track.clips[clipIndex].copyWith(
+          opacity: opacity.clamp(0.0, 1.0),
+        );
+        state = state.copyWith(project: project, isDirty: true);
+        return;
+      }
+    }
+  }
+
+  /// Update clip name
+  void setClipName(EditorId clipId, String name) {
+    final project = _cloneProject();
+    
+    for (final track in project.tracks) {
+      final clipIndex = track.clips.indexWhere((c) => c.id == clipId);
+      if (clipIndex != -1) {
+        track.clips[clipIndex] = track.clips[clipIndex].copyWith(name: name);
+        state = state.copyWith(project: project, isDirty: true);
+        return;
+      }
+    }
+  }
+
+  /// Duplicate a clip
+  EditorClip? duplicateClip(EditorId clipId) {
+    final project = _cloneProject();
+    
+    for (final track in project.tracks) {
+      final clipIndex = track.clips.indexWhere((c) => c.id == clipId);
+      if (clipIndex != -1) {
+        final original = track.clips[clipIndex];
+        // Create a new clip with a new ID, placed right after the original
+        final duplicate = original.copyWith(
+          id: generateId(),
+          name: '${original.name} (copy)',
+          timelineStart: original.timelineEnd,
+        );
+        track.clips.add(duplicate);
+        
+        // Update project duration
+        project.duration = project.calculateDuration();
+        
+        state = state.copyWith(project: project, isDirty: true);
+        return duplicate;
+      }
+    }
+    return null;
+  }
 }
 
 // ============================================================

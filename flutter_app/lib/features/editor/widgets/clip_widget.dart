@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/editor_models.dart';
 import '../providers/clip_thumbnail_provider.dart';
+import '../providers/editor_provider.dart';
 
 /// A widget representing a single clip on the video editor timeline.
 ///
@@ -584,6 +585,46 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
     );
   }
 
+  /// Show rename dialog for the clip
+  void _showRenameDialog(BuildContext context) {
+    final controller = TextEditingController(text: widget.clip.name);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rename Clip'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Clip Name',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) {
+            if (value.isNotEmpty) {
+              ref.read(editorProjectProvider.notifier).setClipName(widget.clip.id, value);
+            }
+            Navigator.of(context).pop();
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              if (controller.text.isNotEmpty) {
+                ref.read(editorProjectProvider.notifier).setClipName(widget.clip.id, controller.text);
+              }
+              Navigator.of(context).pop();
+            },
+            child: const Text('Rename'),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Get appropriate cursor based on hover position
   MouseCursor _getCursor() {
     if (widget.clip.isLocked) {
@@ -677,16 +718,16 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
           widget.onExtractFramesForTraining?.call();
           break;
         case 'rename':
-          // TODO: Implement rename
+          _showRenameDialog(context);
           break;
         case 'duplicate':
-          // TODO: Implement duplicate
+          ref.read(editorProjectProvider.notifier).duplicateClip(widget.clip.id);
           break;
         case 'create_compound':
-          // TODO: Implement create compound clip
+          // Compound clips not yet implemented
           break;
         case 'delete':
-          // TODO: Implement delete
+          ref.read(editorProjectProvider.notifier).removeClip(widget.clip.id);
           break;
       }
     });
