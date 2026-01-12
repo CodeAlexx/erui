@@ -3,6 +3,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+// Conditional import: stub on desktop, web implementation on web
+import 'media_browser_stub.dart'
+    if (dart.library.html) 'media_browser_web.dart' as web_import;
+
 import '../models/editor_models.dart';
 import '../providers/media_browser_provider.dart';
 
@@ -49,29 +53,32 @@ class _MediaBrowserPanelState extends ConsumerState<MediaBrowserPanel> {
   /// Import media files using file picker
   Future<void> _importMedia() async {
     try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: [
-          'mp4', 'webm', 'mov', 'mkv', 'avi', 'gif', // Video
-          'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', // Image
-        ],
-        allowMultiple: true,
-        withData: kIsWeb, // Load bytes on web platform
-      );
+      if (kIsWeb) {
+        // On web, use native HTML file picker with Object URLs
+        // This avoids loading huge files into memory
+        final files = await web_import.pickFilesForWeb();
+        if (files.isNotEmpty) {
+          await ref.read(mediaBrowserProvider.notifier).importFromUrls(files);
+        }
+      } else {
+        // On desktop/mobile, use file paths directly
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: [
+            'mp4', 'webm', 'mov', 'mkv', 'avi', 'gif', // Video
+            'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff', // Image
+          ],
+          allowMultiple: true,
+          withData: false,
+        );
 
-      if (result != null && result.files.isNotEmpty) {
-        if (kIsWeb) {
-          // On web, use bytes
-          await ref.read(mediaBrowserProvider.notifier).importFromBytes(
-            result.files.map((f) => (name: f.name, bytes: f.bytes!)).toList(),
-          );
-        } else {
-          // On desktop/mobile, use paths
+        if (result != null && result.files.isNotEmpty) {
           final paths = result.paths.whereType<String>().toList();
           await ref.read(mediaBrowserProvider.notifier).importFiles(paths);
         }
       }
     } catch (e) {
+      print('DEBUG: Import error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -82,6 +89,7 @@ class _MediaBrowserPanelState extends ConsumerState<MediaBrowserPanel> {
       }
     }
   }
+
 
   /// Show context menu for a media item
   void _showContextMenu(BuildContext context, ImportedMedia media, Offset position) {
@@ -310,18 +318,36 @@ class _MediaBrowserPanelState extends ConsumerState<MediaBrowserPanel> {
         final media = mediaList[index];
         final isSelected = media.id == selectedId;
 
-        return _MediaGridItem(
-          media: media,
-          isSelected: isSelected,
-          onTap: () {
-            ref.read(mediaBrowserProvider.notifier).selectMedia(media.id);
-          },
-          onDoubleTap: () {
-            widget.onMediaDoubleClick?.call(media);
-          },
-          onContextMenu: (position) {
-            _showContextMenu(context, media, position);
-          },
+        // Build tooltip message with file info
+        final tooltipLines = <String>[media.fileName];
+        if (media.displayResolution.isNotEmpty) {
+          tooltipLines.add(media.displayResolution);
+        }
+        if (media.displayDuration.isNotEmpty) {
+          tooltipLines.add(media.displayDuration);
+        }
+        if (media.type == MediaFileType.video) {
+          tooltipLines.add('Video');
+        } else {
+          tooltipLines.add('Image');
+        }
+
+        return Tooltip(
+          message: tooltipLines.join('\n'),
+          waitDuration: const Duration(milliseconds: 500),
+          child: _MediaGridItem(
+            media: media,
+            isSelected: isSelected,
+            onTap: () {
+              ref.read(mediaBrowserProvider.notifier).selectMedia(media.id);
+            },
+            onDoubleTap: () {
+              widget.onMediaDoubleClick?.call(media);
+            },
+            onContextMenu: (position) {
+              _showContextMenu(context, media, position);
+            },
+          ),
         );
       },
     );

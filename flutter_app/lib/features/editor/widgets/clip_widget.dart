@@ -161,17 +161,38 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
     return '$minutes:${remainingSeconds.toStringAsFixed(0).padLeft(2, '0')}';
   }
 
+  /// Build tooltip message for clip info
+  String _buildTooltipMessage() {
+    final lines = <String>[
+      widget.clip.name,
+      'Duration: ${_formatDuration(widget.clip.duration)}',
+      'Type: ${widget.clip.type.name[0].toUpperCase()}${widget.clip.type.name.substring(1)}',
+    ];
+    if (widget.clip.sourcePath != null) {
+      // Show just filename, not full path
+      final fileName = widget.clip.sourcePath!.split('/').last.split('\\').last;
+      lines.add('Source: $fileName');
+    }
+    if (widget.clip.isLocked) {
+      lines.add('(Locked)');
+    }
+    return lines.join('\n');
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final clipColor = _getClipColor();
     final clipWidth = _clipWidth;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: _getCursor(),
-      child: AnimatedBuilder(
+    return Tooltip(
+      message: _buildTooltipMessage(),
+      waitDuration: const Duration(milliseconds: 500),
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        cursor: _getCursor(),
+        child: AnimatedBuilder(
         animation: _selectionGlow,
         builder: (context, child) {
           return Container(
@@ -250,6 +271,7 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
             ),
           );
         },
+      ),
       ),
     );
   }

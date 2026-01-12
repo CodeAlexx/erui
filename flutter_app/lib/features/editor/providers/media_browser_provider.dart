@@ -224,6 +224,59 @@ class MediaBrowserNotifier extends StateNotifier<MediaBrowserState> {
     }
   }
 
+  /// Import media from Object URLs (for web platform - memory efficient)
+  /// Uses blob: URLs instead of loading all bytes into memory
+  Future<void> importFromUrls(List<dynamic> files) async {
+    if (files.isEmpty) return;
+
+    state = state.copyWith(isImporting: true);
+
+    final newMedia = <ImportedMedia>[];
+
+    for (final file in files) {
+      final name = file.name as String;
+      final blobUrl = file.blobUrl as String;
+      
+      // Check file extension
+      final ext = path.extension(name).toLowerCase();
+      if (!supportedMediaExtensions.contains(ext)) {
+        continue;
+      }
+
+      final id = _generateId();
+      final type = _getMediaType(name);
+
+      print('DEBUG: Importing $name with blob URL: $blobUrl');
+
+      newMedia.add(ImportedMedia(
+        id: id,
+        filePath: blobUrl, // Use blob URL as the file path for web
+        fileName: name,
+        type: type,
+        thumbnail: null, // Will be generated asynchronously
+        isLoading: true,
+      ));
+    }
+
+    state = state.copyWith(
+      media: [...state.media, ...newMedia],
+      isImporting: false,
+    );
+
+    // Mark videos as loaded (thumbnails generated separately by clip widget)
+    for (final media in newMedia) {
+      if (media.type == MediaFileType.video) {
+        // Delay slightly to allow UI to update
+        Future.delayed(const Duration(milliseconds: 100), () {
+          _markVideoLoaded(media.id);
+        });
+      } else {
+        // For images, we could fetch the blob and store as thumbnail
+        _markVideoLoaded(media.id);
+      }
+    }
+  }
+
   /// Mark video as loaded (web fallback)
   void _markVideoLoaded(String mediaId) {
     final updatedMedia = state.media.map((m) {
@@ -299,14 +352,26 @@ class MediaBrowserNotifier extends StateNotifier<MediaBrowserState> {
         // Get video info via FFmpeg
         info = await _ffmpegService.getMediaInfo(media.filePath);
 
-        // Extract first frame as thumbnail
+        // Extract frame at 1 second (more likely to hit a keyframe than 0)
+        // Add timeout to prevent blocking on large/problematic videos
         if (info != null && info.hasVideo) {
-          thumbnail = await _ffmpegService.extractFrame(
-            media.filePath,
-            Duration.zero,
-            width: 160,
-            height: 90,
-          );
+          try {
+            thumbnail = await _ffmpegService.extractFrame(
+              media.filePath,
+              const Duration(seconds: 1),
+              width: 160,
+              height: 90,
+            ).timeout(
+              const Duration(seconds: 10),
+              onTimeout: () {
+                print('DEBUG: Thumbnail extraction timed out for ${media.filePath}');
+                return null;
+              },
+            );
+          } catch (e) {
+            print('DEBUG: Thumbnail extraction failed: $e');
+            thumbnail = null;
+          }
         }
       } else {
         // For images, use bytes if available, otherwise probe for info

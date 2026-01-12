@@ -513,9 +513,8 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                             behavior: HitTestBehavior.translucent,
                             onTapUp: (details) =>
                                 _handleBackgroundTap(details, project),
-                            onPanStart: _handlePanStart,
-                            onPanUpdate: _handlePanUpdate,
-                            onPanEnd: _handlePanEnd,
+                            // NOTE: Removed onPan* handlers - they were blocking drag-drop
+                            // Scrolling is handled by mouse wheel via onPointerSignal
                             child: SingleChildScrollView(
                               controller: _horizontalScrollController,
                               scrollDirection: Axis.horizontal,
@@ -1042,20 +1041,29 @@ class _TrackHeaders extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Column(
-      children: tracks.map((track) {
+      children: tracks.asMap().entries.map((entry) {
+        final index = entry.key;
+        final track = entry.value;
         final height = math.max(track.height, 40.0);
 
-        return Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            border: Border(
-              right: BorderSide(color: colorScheme.outlineVariant),
-              bottom: BorderSide(color: colorScheme.outlineVariant),
+        // Build track tooltip
+        final trackTypeStr = track.type.name[0].toUpperCase() + track.type.name.substring(1);
+        final tooltipText = 'Track ${index + 1}: ${track.name}\nType: $trackTypeStr\n${track.clips.length} clip(s)';
+
+        return Tooltip(
+          message: tooltipText,
+          waitDuration: const Duration(milliseconds: 500),
+          child: Container(
+            height: height,
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              border: Border(
+                right: BorderSide(color: colorScheme.outlineVariant),
+                bottom: BorderSide(color: colorScheme.outlineVariant),
+              ),
             ),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Row(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
             children: [
               // Track type icon
               Icon(
@@ -1080,6 +1088,7 @@ class _TrackHeaders extends StatelessWidget {
                 _TrackButton(
                   icon: track.isMuted ? Icons.volume_off : Icons.volume_up,
                   isActive: track.isMuted,
+                  tooltip: track.isMuted ? 'Unmute' : 'Mute',
                   onPressed: () {
                     // Toggle mute
                   },
@@ -1087,6 +1096,7 @@ class _TrackHeaders extends StatelessWidget {
                 _TrackButton(
                   icon: Icons.headphones,
                   isActive: track.isSolo,
+                  tooltip: track.isSolo ? 'Disable Solo' : 'Solo',
                   onPressed: () {
                     // Toggle solo
                   },
@@ -1095,6 +1105,7 @@ class _TrackHeaders extends StatelessWidget {
               _TrackButton(
                 icon: track.isLocked ? Icons.lock : Icons.lock_open,
                 isActive: track.isLocked,
+                tooltip: track.isLocked ? 'Unlock Track' : 'Lock Track',
                 onPressed: () {
                   // Toggle lock
                 },
@@ -1103,11 +1114,13 @@ class _TrackHeaders extends StatelessWidget {
                 icon:
                     track.isVisible ? Icons.visibility : Icons.visibility_off,
                 isActive: !track.isVisible,
+                tooltip: track.isVisible ? 'Hide Track' : 'Show Track',
                 onPressed: () {
                   // Toggle visibility
                 },
               ),
             ],
+          ),
           ),
         );
       }).toList(),
@@ -1141,23 +1154,25 @@ class _TrackHeaders extends StatelessWidget {
   }
 }
 
-/// Small track button
+/// Small track button with tooltip
 class _TrackButton extends StatelessWidget {
   final IconData icon;
   final bool isActive;
   final VoidCallback onPressed;
+  final String? tooltip;
 
   const _TrackButton({
     required this.icon,
     required this.isActive,
     required this.onPressed,
+    this.tooltip,
   });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return SizedBox(
+    Widget button = SizedBox(
       width: 20,
       height: 20,
       child: IconButton(
@@ -1172,6 +1187,16 @@ class _TrackButton extends StatelessWidget {
         onPressed: onPressed,
       ),
     );
+
+    if (tooltip != null) {
+      button = Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 500),
+        child: button,
+      );
+    }
+
+    return button;
   }
 }
 
