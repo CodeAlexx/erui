@@ -11,6 +11,8 @@ EriUI is a complete replacement for multiple AI tools in a single, unified appli
 | SwarmUI | Generate tab, ComfyUI Workflow tab |
 | OneTrainer | Trainer tab |
 | ComfyUI (standalone) | Built-in ComfyUI backend |
+| DaVinci/Premiere | Video Editor tab |
+| VidTrainPrep | Video Train Prep (Utilities) |
 | Any other trainer | Unified training interface |
 
 ## Architecture
@@ -51,6 +53,25 @@ eriui/
 - Preset system
 - Sample generation during training
 - Support for LoRA, LoKr, and other training methods
+
+### Video Editor Tab
+- Multi-track timeline with drag-and-drop clips
+- Frame-accurate playhead with click-to-seek and drag scrubbing
+- Keyboard shortcuts (J/K/L shuttle, arrow keys for frame stepping)
+- Clip thumbnails extracted from video frames
+- Media browser with import and organization
+- Real-time video preview with media_kit
+- Trim, split, and arrange clips on timeline
+- FFmpeg-based export
+
+### Video Train Prep (Utilities)
+- Import video folders with automatic metadata probing
+- Define multiple clip ranges per video with start/end frames
+- Interactive crop region drawing on video preview
+- Per-range captions for training
+- Export cropped/uncropped clips and first frames
+- Generate OneTrainer-compatible YAML configs
+- Model presets for Wan, Hunyuan, LTX-Video, CogVideoX
 
 ## Configuration
 
