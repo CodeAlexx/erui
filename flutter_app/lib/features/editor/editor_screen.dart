@@ -362,21 +362,35 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
 
           const SizedBox(width: 16),
 
-          // Time display
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: colorScheme.surface,
+          // Time display - clickable to go to time
+          Tooltip(
+            message: 'Go to time (click to enter)',
+            child: InkWell(
+              onTap: () => _showGoToTimeDialog(context, project),
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: colorScheme.outlineVariant),
-            ),
-            child: Text(
-              project.playheadPosition.toString(),
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: colorScheme.onSurface,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(4),
+                  border: Border.all(color: colorScheme.outlineVariant),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      project.playheadPosition.toString(),
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.schedule, size: 14, color: colorScheme.onSurfaceVariant),
+                  ],
+                ),
               ),
             ),
           ),
@@ -454,7 +468,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
     } else {
       // On desktop, use media_kit
       final videoController = ref.watch(videoControllerProvider);
-      videoWidget = Video(controller: videoController);
+      // Use explicit fit and controls configuration for proper rendering
+      videoWidget = Video(
+        controller: videoController,
+        fit: BoxFit.contain,
+        controls: NoVideoControls,  // We use our own controls
+      );
       onPlay = () => ref.read(playbackControllerProvider).play();
       onPause = () => ref.read(playbackControllerProvider).pause();
       onStop = () => ref.read(playbackControllerProvider).stop();
@@ -776,6 +795,12 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
       ),
       child: TimelineWidget(
         horizontalScrollController: _timelineHorizontalController,
+        onBackgroundTap: (time, trackIndex) {
+          // Move playhead to clicked position
+          ref.read(editorProjectProvider.notifier).setPlayhead(time);
+          // Also seek the video player
+          ref.read(playbackControllerProvider).seekTo(time);
+        },
       ),
     );
   }
@@ -857,16 +882,36 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
     if (event is! KeyDownEvent) return;
 
     final isCtrl = HardwareKeyboard.instance.isControlPressed;
+    final playbackController = ref.read(playbackControllerProvider);
 
     // Space - Play/Pause
     if (event.logicalKey == LogicalKeyboardKey.space) {
-      final playbackController = ref.read(playbackControllerProvider);
       final playbackState = ref.read(playbackStateProvider);
       if (playbackState == PlaybackState.playing) {
         playbackController.pause();
       } else {
         playbackController.play();
       }
+    }
+    // J - Decrease speed / reverse shuttle
+    else if (event.logicalKey == LogicalKeyboardKey.keyJ) {
+      playbackController.decreaseSpeed();
+    }
+    // K - Stop shuttle / pause
+    else if (event.logicalKey == LogicalKeyboardKey.keyK) {
+      playbackController.stopShuttle();
+    }
+    // L - Increase speed / forward shuttle
+    else if (event.logicalKey == LogicalKeyboardKey.keyL) {
+      playbackController.increaseSpeed();
+    }
+    // Left Arrow - Step back one frame (without Ctrl)
+    else if (event.logicalKey == LogicalKeyboardKey.arrowLeft && !isCtrl) {
+      playbackController.stepFrame(-1);
+    }
+    // Right Arrow - Step forward one frame (without Ctrl)
+    else if (event.logicalKey == LogicalKeyboardKey.arrowRight && !isCtrl) {
+      playbackController.stepFrame(1);
     }
     // Ctrl+Z - Undo
     else if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyZ) {
@@ -891,6 +936,11 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
     else if (event.logicalKey == LogicalKeyboardKey.end) {
       final editorState = ref.read(editorProjectProvider);
       ref.read(editorProjectProvider.notifier).setPlayhead(editorState.project.duration);
+    }
+    // Ctrl+G - Go to time
+    else if (isCtrl && event.logicalKey == LogicalKeyboardKey.keyG) {
+      final editorState = ref.read(editorProjectProvider);
+      _showGoToTimeDialog(context, editorState.project);
     }
   }
 
@@ -922,6 +972,97 @@ class _EditorScreenState extends ConsumerState<EditorScreen> with SingleTickerPr
       context: context,
       builder: (context) => const ExportDialog(),
     );
+  }
+
+  void _showGoToTimeDialog(BuildContext context, EditorProject project) {
+    final textController = TextEditingController(
+      text: project.playheadPosition.toString(),
+    );
+    final colorScheme = Theme.of(context).colorScheme;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.schedule, color: colorScheme.primary),
+            const SizedBox(width: 8),
+            const Text('Go to Time'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: textController,
+              autofocus: true,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 18),
+              decoration: InputDecoration(
+                hintText: '00:00:00',
+                hintStyle: TextStyle(color: colorScheme.onSurfaceVariant.withOpacity(0.5)),
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.timer_outlined),
+              ),
+              onSubmitted: (value) {
+                _goToTime(value, project, context);
+              },
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Enter time as HH:MM:SS or MM:SS',
+              style: TextStyle(
+                fontSize: 12,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Examples: 01:24:28 (1h 24m 28s), 05:30 (5m 30s)',
+              style: TextStyle(
+                fontSize: 11,
+                color: colorScheme.onSurfaceVariant.withOpacity(0.7),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => _goToTime(textController.text, project, context),
+            child: const Text('Go'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _goToTime(String timeStr, EditorProject project, BuildContext dialogContext) {
+    final time = EditorTime.tryParse(timeStr, fps: project.settings.frameRate);
+    if (time == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Invalid time format. Use HH:MM:SS or MM:SS'),
+          backgroundColor: Colors.red.shade700,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    // Clamp to project duration
+    final clampedTime = EditorTime(
+      time.microseconds.clamp(0, project.duration.microseconds),
+    );
+
+    Navigator.of(dialogContext).pop();
+    ref.read(editorProjectProvider.notifier).setPlayhead(clampedTime);
+
+    // Also seek the player
+    ref.read(playbackControllerProvider).seekTo(clampedTime);
   }
 }
 

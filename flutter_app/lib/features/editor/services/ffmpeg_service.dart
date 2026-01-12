@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -7,6 +8,7 @@ import 'package:ffmpeg_kit_flutter_full/ffmpeg_kit_config.dart';
 import 'package:ffmpeg_kit_flutter_full/ffprobe_kit.dart';
 import 'package:ffmpeg_kit_flutter_full/return_code.dart';
 import 'package:ffmpeg_kit_flutter_full/statistics.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as path;
 
@@ -120,6 +122,10 @@ class ExportClip {
 class FFmpegService {
   static const String _tag = 'FFmpegService';
 
+  /// Check if running on desktop (where ffmpeg_kit doesn't work)
+  bool get _isDesktop =>
+      !kIsWeb && (Platform.isLinux || Platform.isWindows || Platform.isMacOS);
+
   /// Log a debug message
   void _log(String message) {
     print('[$_tag] $message');
@@ -130,10 +136,174 @@ class FFmpegService {
     print('[$_tag] ERROR: $message${error != null ? ' - $error' : ''}');
   }
 
+  /// Get media info using native ffprobe (for desktop platforms)
+  Future<MediaInfo?> _getMediaInfoNative(String filePath) async {
+    _log('Getting media info using native ffprobe for: $filePath');
+
+    try {
+      final result = await Process.run('ffprobe', [
+        '-v',
+        'quiet',
+        '-print_format',
+        'json',
+        '-show_format',
+        '-show_streams',
+        filePath,
+      ]);
+
+      if (result.exitCode != 0) {
+        _logError('ffprobe failed', result.stderr);
+        return null;
+      }
+
+      final json = jsonDecode(result.stdout as String) as Map<String, dynamic>;
+
+      // Parse format info
+      final format = json['format'] as Map<String, dynamic>?;
+      final durationStr = format?['duration'] as String?;
+      final durationMs =
+          durationStr != null ? (double.tryParse(durationStr) ?? 0) * 1000 : 0.0;
+      final fileSizeStr = format?['size'] as String?;
+      final fileSize = fileSizeStr != null ? int.tryParse(fileSizeStr) : null;
+
+      // Parse streams
+      int? width;
+      int? height;
+      double? fps;
+      String? videoCodec;
+      int? videoBitrate;
+      String? audioCodec;
+      int? audioChannels;
+      int? sampleRate;
+      int? audioBitrate;
+
+      final streams = json['streams'] as List<dynamic>?;
+      if (streams != null) {
+        for (final stream in streams) {
+          final s = stream as Map<String, dynamic>;
+          final codecType = s['codec_type'] as String?;
+
+          if (codecType == 'video') {
+            width = s['width'] as int?;
+            height = s['height'] as int?;
+            videoCodec = s['codec_name'] as String?;
+
+            // Parse frame rate
+            final fpsStr = s['r_frame_rate'] as String?;
+            if (fpsStr != null && fpsStr.contains('/')) {
+              final parts = fpsStr.split('/');
+              if (parts.length == 2) {
+                final num = double.tryParse(parts[0]) ?? 0;
+                final den = double.tryParse(parts[1]) ?? 1;
+                fps = den > 0 ? num / den : null;
+              }
+            }
+
+            final bitrateStr = s['bit_rate'] as String?;
+            videoBitrate = bitrateStr != null ? int.tryParse(bitrateStr) : null;
+          } else if (codecType == 'audio') {
+            audioCodec = s['codec_name'] as String?;
+            audioChannels = s['channels'] as int?;
+            final sampleRateStr = s['sample_rate'] as String?;
+            sampleRate =
+                sampleRateStr != null ? int.tryParse(sampleRateStr) : null;
+            final bitrateStr = s['bit_rate'] as String?;
+            audioBitrate = bitrateStr != null ? int.tryParse(bitrateStr) : null;
+          }
+        }
+      }
+
+      final result2 = MediaInfo(
+        path: filePath,
+        duration: Duration(milliseconds: durationMs.round()),
+        width: width,
+        height: height,
+        fps: fps,
+        codec: videoCodec,
+        audioCodec: audioCodec,
+        audioChannels: audioChannels,
+        sampleRate: sampleRate,
+        videoBitrate: videoBitrate,
+        audioBitrate: audioBitrate,
+        fileSize: fileSize,
+      );
+
+      _log('Media info retrieved (native): $result2');
+      return result2;
+    } catch (e) {
+      _logError('Native ffprobe failed', e);
+      return null;
+    }
+  }
+
+  /// Extract a frame using native ffmpeg (for desktop platforms)
+  Future<Uint8List?> _extractFrameNative(
+    String filePath,
+    Duration timestamp, {
+    int? width,
+    int? height,
+  }) async {
+    _log('Extracting frame at ${timestamp.inMilliseconds}ms using native ffmpeg from: $filePath');
+
+    try {
+      final tempDir = Directory.systemTemp;
+      final outputPath = path.join(
+        tempDir.path,
+        'frame_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+
+      final timeStr = _formatTimestamp(timestamp);
+
+      // Build ffmpeg arguments
+      final args = <String>[
+        '-ss',
+        timeStr,
+        '-i',
+        filePath,
+        '-vframes',
+        '1',
+        '-q:v',
+        '2',
+      ];
+
+      // Add scale filter if dimensions specified
+      if (width != null && height != null) {
+        args.addAll(['-vf', 'scale=$width:$height']);
+      }
+
+      args.addAll(['-y', outputPath]);
+
+      _log('Running native ffmpeg: ffmpeg ${args.join(' ')}');
+
+      final result = await Process.run('ffmpeg', args);
+
+      if (result.exitCode == 0) {
+        final file = File(outputPath);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          await file.delete();
+          _log('Frame extracted successfully (native): ${bytes.length} bytes');
+          return bytes;
+        }
+      }
+
+      _logError('Native ffmpeg frame extraction failed', result.stderr);
+      return null;
+    } catch (e) {
+      _logError('Native frame extraction error', e);
+      return null;
+    }
+  }
+
   /// Get media information from a file
   /// Returns null if the file cannot be probed or is not a valid media file
   Future<MediaInfo?> getMediaInfo(String filePath) async {
     _log('Getting media info for: $filePath');
+
+    // Use native ffprobe on desktop platforms
+    if (_isDesktop) {
+      return _getMediaInfoNative(filePath);
+    }
 
     try {
       final session = await FFprobeKit.getMediaInformation(filePath);
@@ -243,6 +413,11 @@ class FFmpegService {
     int? height,
   }) async {
     _log('Extracting frame at ${timestamp.inMilliseconds}ms from: $filePath');
+
+    // Use native ffmpeg on desktop platforms
+    if (_isDesktop) {
+      return _extractFrameNative(filePath, timestamp, width: width, height: height);
+    }
 
     try {
       // Create a temporary file for the output

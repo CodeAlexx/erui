@@ -21,6 +21,54 @@ class EditorTime {
   factory EditorTime.fromFrames(int frames, double fps) =>
       EditorTime.fromSeconds(frames / fps);
 
+  /// Parse time string in format HH:MM:SS:FF, HH:MM:SS, MM:SS:FF, or MM:SS
+  /// Supports flexible parsing - accepts 2-4 colon-separated segments
+  /// Returns null if parsing fails
+  static EditorTime? tryParse(String timeStr, {double fps = 30.0}) {
+    try {
+      final parts = timeStr.trim().split(':');
+      if (parts.length < 2 || parts.length > 4) return null;
+
+      int hours = 0;
+      int minutes = 0;
+      int seconds = 0;
+      int frames = 0;
+
+      if (parts.length == 4) {
+        // HH:MM:SS:FF
+        hours = int.parse(parts[0]);
+        minutes = int.parse(parts[1]);
+        seconds = int.parse(parts[2]);
+        frames = int.parse(parts[3]);
+      } else if (parts.length == 3) {
+        // HH:MM:SS format (most common for video editing)
+        hours = int.parse(parts[0]);
+        minutes = int.parse(parts[1]);
+        seconds = int.parse(parts[2]);
+      } else if (parts.length == 2) {
+        // MM:SS
+        minutes = int.parse(parts[0]);
+        seconds = int.parse(parts[1]);
+      }
+
+      // Validate ranges (hours can be any non-negative number)
+      if (hours < 0 || minutes < 0 || minutes > 59 || seconds < 0 || seconds > 59) {
+        return null;
+      }
+      if (frames < 0 || frames >= fps) return null;
+
+      final totalSeconds = hours * 3600 + minutes * 60 + seconds + (frames / fps);
+      return EditorTime.fromSeconds(totalSeconds);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Parse time string, returns zero on failure
+  factory EditorTime.fromString(String timeStr, {double fps = 30.0}) {
+    return tryParse(timeStr, fps: fps) ?? const EditorTime.zero();
+  }
+
   double get inSeconds => microseconds / 1000000.0;
   int get inMilliseconds => microseconds ~/ 1000;
   int toFrames(double fps) => (inSeconds * fps).round();
@@ -51,10 +99,8 @@ class EditorTime {
     final seconds = totalSeconds % 60;
     final frames = (seconds % 1 * 30).round(); // Assuming 30fps for display
 
-    if (hours > 0) {
-      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.floor().toString().padLeft(2, '0')}:${frames.toString().padLeft(2, '0')}';
-    }
-    return '${minutes.toString().padLeft(2, '0')}:${seconds.floor().toString().padLeft(2, '0')}:${frames.toString().padLeft(2, '0')}';
+    // Always show HH:MM:SS:FF format for consistent width (prevents jitter)
+    return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.floor().toString().padLeft(2, '0')}:${frames.toString().padLeft(2, '0')}';
   }
 }
 

@@ -139,6 +139,8 @@ class PlaybackController {
     final editorState = _ref.read(editorProjectProvider);
     final playheadPosition = editorState.project.playheadPosition;
 
+    _log('play() playhead position: $playheadPosition');
+
     // Find the clip at the current playhead position
     final clipToPlay = _findClipAtPosition(editorState.project, playheadPosition);
 
@@ -157,7 +159,8 @@ class PlaybackController {
       return;
     }
 
-    await _playClip(clipToPlay, playheadPosition);
+    // Always play from the current playhead position (force seek)
+    await _playClip(clipToPlay, playheadPosition, forceSeek: true);
   }
 
   /// Pause playback
@@ -171,7 +174,7 @@ class PlaybackController {
     _stopPositionSync();
   }
 
-  /// Stop playback and reset to start
+  /// Stop playback (keeps playhead at current position)
   Future<void> stop() async {
     if (_disposed) return;
 
@@ -182,11 +185,6 @@ class PlaybackController {
     _activeClipController.add(null);
     _updateStatus(PlaybackStatus.stopped);
     _stopPositionSync();
-
-    // Reset playhead to in-point or start
-    final editorState = _ref.read(editorProjectProvider);
-    final resetPosition = editorState.project.inPoint ?? const EditorTime.zero();
-    _ref.read(editorProjectProvider.notifier).setPlayhead(resetPosition);
   }
 
   /// Toggle between play and pause
@@ -411,7 +409,7 @@ class PlaybackController {
     }
   }
 
-  Future<void> _playClip(EditorClip clip, EditorTime playheadPosition) async {
+  Future<void> _playClip(EditorClip clip, EditorTime playheadPosition, {bool forceSeek = false}) async {
     if (clip.sourcePath == null) {
       _logError('Clip has no source path');
       return;
@@ -421,21 +419,32 @@ class PlaybackController {
     final sourceOffset = playheadPosition - clip.timelineStart;
     final sourcePosition = clip.sourceStart + sourceOffset;
 
-    _log('Playing clip: ${clip.name} at source position: $sourcePosition');
+    _log('Playing clip: ${clip.name}');
+    _log('  sourcePath: ${clip.sourcePath}');
+    _log('  playheadPosition: $playheadPosition');
+    _log('  sourceOffset: $sourceOffset');
+    _log('  sourcePosition: $sourcePosition');
+    _log('  forceSeek: $forceSeek');
 
     // Open the media if it's a different clip
     if (_activeClip?.id != clip.id) {
+      _log('Opening new clip...');
       await _openClip(clip);
+      _log('Clip opened');
     }
 
-    // Seek to the correct position
+    // Seek to the correct position (always seek if forceSeek is true)
+    _log('Seeking to position...');
     await _player.seek(Duration(microseconds: sourcePosition.microseconds));
+    _log('Seek complete');
 
     // Set playback rate
     await _player.setRate(_playbackRate);
 
     // Start playback
+    _log('Starting playback...');
     await _player.play();
+    _log('Play command sent');
 
     _activeClip = clip;
     _activeClipController.add(ActiveClipInfo(
@@ -524,7 +533,13 @@ class PlaybackController {
     if (_disposed || _activeClip == null) return;
 
     final playerPosition = _player.state.position;
+    final playerPlaying = _player.state.playing;
     final clip = _activeClip!;
+
+    // Log every second (60 calls)
+    if (playerPosition.inMilliseconds % 1000 < 20) {
+      _log('_syncPosition: playerPos=$playerPosition, playing=$playerPlaying');
+    }
 
     // Calculate timeline position from player position
     final sourceOffset = EditorTime(playerPosition.inMicroseconds) - clip.sourceStart;

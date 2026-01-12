@@ -352,13 +352,20 @@ class MediaBrowserNotifier extends StateNotifier<MediaBrowserState> {
         // Get video info via FFmpeg
         info = await _ffmpegService.getMediaInfo(media.filePath);
 
-        // Extract frame at 1 second (more likely to hit a keyframe than 0)
+        // Extract frame at 10% into the video (better chance of interesting content)
         // Add timeout to prevent blocking on large/problematic videos
         if (info != null && info.hasVideo) {
           try {
+            // Extract at 10% of duration, min 1 second, max 30 seconds
+            final extractTime = Duration(
+              milliseconds: (info.duration.inMilliseconds * 0.1)
+                  .clamp(1000, 30000)
+                  .toInt(),
+            );
+            print('DEBUG: Extracting thumbnail at $extractTime for ${media.fileName}');
             thumbnail = await _ffmpegService.extractFrame(
               media.filePath,
-              const Duration(seconds: 1),
+              extractTime,
               width: 160,
               height: 90,
             ).timeout(
@@ -383,6 +390,9 @@ class MediaBrowserNotifier extends StateNotifier<MediaBrowserState> {
       }
 
       // Update state with loaded info
+      print('DEBUG: _loadMediaInfo complete for ${media.fileName}');
+      print('DEBUG: info=$info, thumbnail=${thumbnail != null ? "${thumbnail.length} bytes" : "null"}');
+
       final updatedMedia = state.media.map((m) {
         if (m.id == mediaId) {
           return m.copyWith(
@@ -395,6 +405,7 @@ class MediaBrowserNotifier extends StateNotifier<MediaBrowserState> {
       }).toList();
 
       state = state.copyWith(media: updatedMedia);
+      print('DEBUG: State updated, media count: ${state.media.length}');
     } catch (e) {
       // Update with error state
       final updatedMedia = state.media.map((m) {

@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/editor_models.dart';
 import '../providers/editor_provider.dart';
 import '../providers/media_browser_provider.dart';
+import '../services/playback_controller.dart';
 import '../../gallery/widgets/gallery_drag_source.dart';
 import 'media_browser_panel.dart';
 import 'clip_widget.dart';
@@ -60,6 +62,7 @@ class TimelineWidget extends ConsumerStatefulWidget {
 class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
   late ScrollController _horizontalScrollController;
   final ScrollController _verticalScrollController = ScrollController();
+  final ScrollController _timeRulerScrollController = ScrollController();
 
   /// Track header width
   static const double _trackHeaderWidth = 120.0;
@@ -86,6 +89,17 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     // Use external scroll controller if provided, otherwise create our own
     _horizontalScrollController =
         widget.horizontalScrollController ?? ScrollController();
+
+    // Sync time ruler when main timeline scrolls
+    _horizontalScrollController.addListener(_syncTimeRulerScroll);
+  }
+
+  void _syncTimeRulerScroll() {
+    if (_timeRulerScrollController.hasClients && _horizontalScrollController.hasClients) {
+      if ((_timeRulerScrollController.offset - _horizontalScrollController.offset).abs() > 0.5) {
+        _timeRulerScrollController.jumpTo(_horizontalScrollController.offset);
+      }
+    }
   }
 
   @override
@@ -93,22 +107,77 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     super.didUpdateWidget(oldWidget);
     // Handle scroll controller changes
     if (widget.horizontalScrollController != oldWidget.horizontalScrollController) {
+      _horizontalScrollController.removeListener(_syncTimeRulerScroll);
       if (oldWidget.horizontalScrollController == null) {
         _horizontalScrollController.dispose();
       }
       _horizontalScrollController =
           widget.horizontalScrollController ?? ScrollController();
+      _horizontalScrollController.addListener(_syncTimeRulerScroll);
     }
   }
 
   @override
   void dispose() {
+    _horizontalScrollController.removeListener(_syncTimeRulerScroll);
     // Only dispose if we created our own controller
     if (widget.horizontalScrollController == null) {
       _horizontalScrollController.dispose();
     }
     _verticalScrollController.dispose();
+    _timeRulerScrollController.dispose();
     super.dispose();
+  }
+
+  /// Scroll timeline to keep playhead visible during playback
+  void _scrollToFollowPlayhead(EditorTime playheadPosition, double zoomLevel) {
+    if (!_horizontalScrollController.hasClients) return;
+
+    final playheadX = playheadPosition.inSeconds * zoomLevel;
+    final viewportWidth = _horizontalScrollController.position.viewportDimension;
+    final currentScroll = _horizontalScrollController.offset;
+
+    // Keep playhead in the center-right portion of the viewport (70% from left)
+    final targetScrollPosition = playheadX - (viewportWidth * 0.7);
+
+    // Only scroll if playhead is outside the visible area or too close to edges
+    final leftEdge = currentScroll;
+    final rightEdge = currentScroll + viewportWidth;
+
+    if (playheadX < leftEdge + 50 || playheadX > rightEdge - 50) {
+      _horizontalScrollController.jumpTo(
+        targetScrollPosition.clamp(0, _horizontalScrollController.position.maxScrollExtent),
+      );
+    }
+  }
+
+  /// Scroll timeline to keep playhead visible during drag (more responsive)
+  void _scrollToKeepPlayheadVisible(EditorTime playheadPosition, double zoomLevel) {
+    if (!_horizontalScrollController.hasClients) return;
+
+    final playheadX = playheadPosition.inSeconds * zoomLevel;
+    final viewportWidth = _horizontalScrollController.position.viewportDimension;
+    final currentScroll = _horizontalScrollController.offset;
+    final maxScroll = _horizontalScrollController.position.maxScrollExtent;
+
+    final leftEdge = currentScroll;
+    final rightEdge = currentScroll + viewportWidth;
+
+    // If playhead is outside visible area, scroll to center it
+    if (playheadX < leftEdge || playheadX > rightEdge) {
+      final targetScroll = playheadX - (viewportWidth / 2);
+      _horizontalScrollController.jumpTo(targetScroll.clamp(0, maxScroll));
+    }
+    // If playhead is near left edge, scroll left
+    else if (playheadX < leftEdge + 80) {
+      final targetScroll = currentScroll - 100;
+      _horizontalScrollController.jumpTo(targetScroll.clamp(0, maxScroll));
+    }
+    // If playhead is near right edge, scroll right
+    else if (playheadX > rightEdge - 80) {
+      final targetScroll = currentScroll + 100;
+      _horizontalScrollController.jumpTo(targetScroll.clamp(0, maxScroll));
+    }
   }
 
   /// Convert time to pixel position based on zoom level
@@ -290,17 +359,23 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     EditorProject project,
   ) {
     print('DEBUG: _handleMediaDrop called with ${data.media.fileName}');
+    print('DEBUG: localPosition=$localPosition, scrollOffset=(${_horizontalScrollController.offset}, ${_verticalScrollController.offset})');
+
     // Calculate drop position in pixels (accounting for scroll)
     final pixelX = localPosition.dx + _horizontalScrollController.offset;
     final pixelY = localPosition.dy + _verticalScrollController.offset;
+    print('DEBUG: pixelX=$pixelX, pixelY=$pixelY');
 
     // Convert pixel position to time
     final dropTime = _pixelToTime(pixelX, project.zoomLevel);
+    print('DEBUG: dropTime=$dropTime');
 
     // Find which track was dropped on
     final trackIndex = _getTrackIndexAtY(pixelY, project.tracks);
+    print('DEBUG: trackIndex=$trackIndex, tracks=${project.tracks.length}');
 
     if (trackIndex == null || trackIndex >= project.tracks.length) {
+      print('DEBUG: Invalid track index - dropping aborted');
       return; // Invalid track
     }
 
@@ -341,8 +416,10 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     }
 
     if (!isCompatible) {
+      print('DEBUG: Track type ${track.type} not compatible with clip type $clipType');
       return;
     }
+    print('DEBUG: Track compatible, creating clip');
 
     // Create the new clip
     final newClip = EditorClip(
@@ -356,8 +433,10 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     );
 
     // Add clip to the track using the editor provider
+    print('DEBUG: Creating clip at $dropTime on track ${track.name}');
     final notifier = ref.read(editorProjectProvider.notifier);
     notifier.addClip(track.id, newClip);
+    print('DEBUG: Clip added via drag-drop');
 
     // Also trigger the onFileDrop callback if provided
     widget.onFileDrop?.call(data.media.filePath, dropTime, trackIndex);
@@ -413,7 +492,20 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
     final selectedClipIds = ref.watch(selectedClipIdsProvider);
     final colorScheme = Theme.of(context).colorScheme;
 
+    // Watch playback position stream to trigger rebuilds during playback
+    // This ensures the timeline updates continuously when playing
+    final playbackPosition = ref.watch(playbackPositionProvider);
+
     final project = editorState.project;
+
+    // Auto-scroll to follow playhead during playback
+    // Use the stream position if available, otherwise use project position
+    final currentPlayhead = playbackPosition.valueOrNull ?? project.playheadPosition;
+    if (editorState.playbackState == PlaybackState.playing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _scrollToFollowPlayhead(currentPlayhead, project.zoomLevel);
+      });
+    }
 
     final totalHeight = project.tracks.fold<double>(
       0,
@@ -442,16 +534,21 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                     ),
                   ),
                 ),
-                // Time ruler
+                // Time ruler (separate scroll but synced via listener)
                 Expanded(
                   child: SingleChildScrollView(
-                    controller: _horizontalScrollController,
+                    controller: _timeRulerScrollController,
                     scrollDirection: Axis.horizontal,
+                    physics: const NeverScrollableScrollPhysics(), // Disable manual scroll - synced from timeline
                     child: _TimeRuler(
                       duration: project.duration,
                       zoomLevel: project.zoomLevel,
                       width: totalWidth,
                       fps: project.settings.frameRate,
+                      onTap: (time) {
+                        ref.read(editorProjectProvider.notifier).setPlayhead(time);
+                        ref.read(playbackControllerProvider).seekTo(time);
+                      },
                     ),
                   ),
                 ),
@@ -513,9 +610,43 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                             behavior: HitTestBehavior.translucent,
                             onTapUp: (details) =>
                                 _handleBackgroundTap(details, project),
-                            // NOTE: Removed onPan* handlers - they were blocking drag-drop
-                            // Scrolling is handled by mouse wheel via onPointerSignal
-                            child: SingleChildScrollView(
+                            // Middle mouse button drag to scroll (shift+drag also works)
+                            onSecondaryTapDown: (_) => _isDraggingToScroll = false,
+                            child: Listener(
+                              // Handle middle mouse button drag-to-scroll
+                              onPointerDown: (event) {
+                                // Middle mouse button (button 4)
+                                if (event.buttons == 4) {
+                                  _isDraggingToScroll = true;
+                                  _lastDragPosition = event.localPosition;
+                                }
+                              },
+                              onPointerMove: (event) {
+                                if (_isDraggingToScroll) {
+                                  final delta = _lastDragPosition - event.localPosition;
+                                  _lastDragPosition = event.localPosition;
+                                  if (_horizontalScrollController.hasClients) {
+                                    _horizontalScrollController.jumpTo(
+                                      (_horizontalScrollController.offset + delta.dx).clamp(
+                                        0.0,
+                                        _horizontalScrollController.position.maxScrollExtent,
+                                      ),
+                                    );
+                                  }
+                                  if (_verticalScrollController.hasClients) {
+                                    _verticalScrollController.jumpTo(
+                                      (_verticalScrollController.offset + delta.dy).clamp(
+                                        0.0,
+                                        _verticalScrollController.position.maxScrollExtent,
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              onPointerUp: (event) {
+                                _isDraggingToScroll = false;
+                              },
+                              child: SingleChildScrollView(
                               controller: _horizontalScrollController,
                               scrollDirection: Axis.horizontal,
                               child: SingleChildScrollView(
@@ -547,6 +678,25 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                                         zoomLevel: project.zoomLevel,
                                         height: totalHeight,
                                         color: colorScheme.primary,
+                                        onPositionChanged: (time) {
+                                          ref.read(editorProjectProvider.notifier).setPlayhead(time);
+                                          // Auto-scroll to keep playhead visible during drag
+                                          _scrollToKeepPlayheadVisible(time, project.zoomLevel);
+                                          // Live scrubbing - update video preview while dragging
+                                          ref.read(playbackControllerProvider).seekTo(time);
+                                        },
+                                        onDragStart: () {
+                                          // Pause playback during scrub
+                                          final playbackState = ref.read(playbackStateProvider);
+                                          if (playbackState == PlaybackState.playing) {
+                                            ref.read(playbackControllerProvider).pause();
+                                          }
+                                        },
+                                        onDragEnd: () {
+                                          // Seek player to new position
+                                          final position = ref.read(editorProjectProvider).project.playheadPosition;
+                                          ref.read(playbackControllerProvider).seekTo(position);
+                                        },
                                       ),
                                       // In/Out markers
                                       if (project.inPoint != null)
@@ -589,20 +739,21 @@ class _TimelineWidgetState extends ConsumerState<TimelineWidget> {
                               ),
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        ),  // Closes middle-mouse Listener
+                      );
+                    },
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
-  /// Build clip widgets
+/// Build clip widgets
   List<Widget> _buildClips(
     EditorProject project,
     Set<EditorId> selectedClipIds,
@@ -905,33 +1056,48 @@ class _TimeRuler extends StatelessWidget {
   final double zoomLevel;
   final double width;
   final double fps;
+  final void Function(EditorTime time)? onTap;
 
   const _TimeRuler({
     required this.duration,
     required this.zoomLevel,
     required this.width,
     required this.fps,
+    this.onTap,
   });
+
+  EditorTime _pixelToTime(double x) {
+    return EditorTime.fromSeconds(x / zoomLevel);
+  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Container(
-      width: width,
-      height: 32,
-      decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHighest,
-        border: Border(
-          bottom: BorderSide(color: colorScheme.outlineVariant),
-        ),
-      ),
-      child: CustomPaint(
-        painter: _TimeRulerPainter(
-          duration: duration,
-          zoomLevel: zoomLevel,
-          colorScheme: colorScheme,
-          fps: fps,
+    return GestureDetector(
+      onTapUp: (details) {
+        final time = _pixelToTime(details.localPosition.dx);
+        onTap?.call(time);
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          width: width,
+          height: 32,
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            border: Border(
+              bottom: BorderSide(color: colorScheme.outlineVariant),
+            ),
+          ),
+          child: CustomPaint(
+            painter: _TimeRulerPainter(
+              duration: duration,
+              zoomLevel: zoomLevel,
+              colorScheme: colorScheme,
+              fps: fps,
+            ),
+          ),
         ),
       ),
     );
@@ -1556,49 +1722,153 @@ class _WaveformPainter extends CustomPainter {
   }
 }
 
-/// Playhead indicator
-class _Playhead extends StatelessWidget {
+/// Playhead indicator with drag support
+class _Playhead extends StatefulWidget {
   final EditorTime position;
   final double zoomLevel;
   final double height;
   final Color color;
+  final void Function(EditorTime time)? onPositionChanged;
+  final VoidCallback? onDragStart;
+  final VoidCallback? onDragEnd;
 
   const _Playhead({
     required this.position,
     required this.zoomLevel,
     required this.height,
     required this.color,
+    this.onPositionChanged,
+    this.onDragStart,
+    this.onDragEnd,
   });
 
   @override
+  State<_Playhead> createState() => _PlayheadState();
+}
+
+class _PlayheadState extends State<_Playhead> {
+  bool _isDragging = false;
+  bool _isHovering = false;
+  double _dragStartX = 0;
+  EditorTime _dragStartPosition = const EditorTime.zero();
+
+  static const double _hitAreaWidth = 20.0;
+
+  void _handleDragStart(DragStartDetails details) {
+    setState(() {
+      _isDragging = true;
+      _dragStartX = details.localPosition.dx;
+      _dragStartPosition = widget.position;
+    });
+    widget.onDragStart?.call();
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details) {
+    if (!_isDragging) return;
+
+    final deltaX = details.localPosition.dx - _dragStartX;
+    final deltaTime = EditorTime.fromSeconds(deltaX / widget.zoomLevel);
+    var newTime = _dragStartPosition + deltaTime;
+
+    // Clamp to non-negative
+    if (newTime.microseconds < 0) {
+      newTime = const EditorTime.zero();
+    }
+
+    widget.onPositionChanged?.call(newTime);
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    setState(() => _isDragging = false);
+    widget.onDragEnd?.call();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final x = position.inSeconds * zoomLevel;
+    final x = widget.position.inSeconds * widget.zoomLevel;
 
     return Positioned(
-      left: x - 1,
+      left: x - _hitAreaWidth / 2,
       top: 0,
-      child: Column(
-        children: [
-          // Playhead handle
-          Container(
-            width: 10,
-            height: 12,
-            transform: Matrix4.translationValues(-4, 0, 0),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(4),
-                bottomRight: Radius.circular(4),
-              ),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeColumn,
+        onEnter: (_) => setState(() => _isHovering = true),
+        onExit: (_) => setState(() => _isHovering = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: _handleDragStart,
+          onHorizontalDragUpdate: _handleDragUpdate,
+          onHorizontalDragEnd: _handleDragEnd,
+          child: SizedBox(
+            width: _hitAreaWidth,
+            height: widget.height,
+            child: Stack(
+              clipBehavior: ui.Clip.none,
+              children: [
+                // Playhead handle - centered in hit area
+                Positioned(
+                  left: (_hitAreaWidth - 10) / 2,
+                  top: 0,
+                  child: Container(
+                    width: 10,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: _isDragging || _isHovering
+                          ? widget.color
+                          : widget.color.withOpacity(0.9),
+                      borderRadius: const BorderRadius.only(
+                        bottomLeft: Radius.circular(4),
+                        bottomRight: Radius.circular(4),
+                      ),
+                      boxShadow: _isDragging || _isHovering
+                          ? [
+                              BoxShadow(
+                                color: widget.color.withOpacity(0.5),
+                                blurRadius: 4,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                ),
+                // Playhead line - centered in hit area
+                Positioned(
+                  left: (_hitAreaWidth - 2) / 2,
+                  top: 12,
+                  child: Container(
+                    width: 2,
+                    height: widget.height - 12,
+                    color: widget.color,
+                  ),
+                ),
+                // Time tooltip during drag
+                if (_isDragging)
+                  Positioned(
+                    left: (_hitAreaWidth - 80) / 2,
+                    top: 16,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xE6222222),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: widget.color, width: 1),
+                      ),
+                      child: Text(
+                        widget.position.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          // Playhead line
-          Container(
-            width: 2,
-            height: height - 12,
-            color: color,
-          ),
-        ],
+        ),
       ),
     );
   }

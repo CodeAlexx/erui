@@ -278,54 +278,52 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
 
   /// Build the main clip content
   Widget _buildClipContent(Color clipColor, ColorScheme colorScheme) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            clipColor.withOpacity(0.9),
-            clipColor.withOpacity(0.7),
-          ],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Thumbnail preview as background (full coverage)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: _buildThumbnailPreview(clipColor),
         ),
-      ),
-      child: Stack(
-        children: [
-          // Thumbnail preview placeholder
-          Positioned.fill(
-            child: _buildThumbnailPreview(clipColor),
-          ),
-
-          // Waveform for audio clips
-          if (widget.clip.type == ClipType.audio)
-            Positioned.fill(
-              child: _buildWaveformPreview(clipColor),
+        // Semi-transparent gradient overlay for better text visibility
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                clipColor.withOpacity(0.4),
+                clipColor.withOpacity(0.2),
+              ],
             ),
-
-          // Top bar with clip info
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: _buildClipHeader(clipColor),
           ),
-
-          // Duration overlay (bottom right)
+        ),
+        // Waveform for audio clips
+        if (widget.clip.type == ClipType.audio)
+          _buildWaveformPreview(clipColor),
+        // Top bar with clip info
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _buildClipHeader(clipColor),
+        ),
+        // Duration overlay (bottom right)
+        Positioned(
+          bottom: 4,
+          right: 6,
+          child: _buildDurationBadge(clipColor),
+        ),
+        // Opacity indicator (if not 100%)
+        if (widget.clip.opacity < 1.0)
           Positioned(
             bottom: 4,
-            right: 6,
-            child: _buildDurationBadge(clipColor),
+            left: 6,
+            child: _buildOpacityBadge(clipColor),
           ),
-
-          // Opacity indicator (if not 100%)
-          if (widget.clip.opacity < 1.0)
-            Positioned(
-              bottom: 4,
-              left: 6,
-              child: _buildOpacityBadge(clipColor),
-            ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -365,20 +363,34 @@ class _ClipWidgetState extends ConsumerState<ClipWidget>
       data: (thumbnails) {
         print('[ClipWidget] Got ${thumbnails.length} thumbnails for ${widget.clip.name}');
         if (thumbnails.isEmpty) {
+          print('[ClipWidget] Thumbnails list is empty!');
           return _buildPlaceholderPattern();
         }
-        return Row(
-          children: thumbnails
-              .map(
-                (bytes) => Expanded(
-                  child: Image.memory(
-                    bytes,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
+        print('[ClipWidget] First thumbnail size: ${thumbnails.first.length} bytes');
+        // DEBUG: Show green if thumbnails exist, red containers for each image
+        return Container(
+          color: Colors.green.withOpacity(0.5), // DEBUG: green = thumbnails loaded
+          child: Row(
+            children: thumbnails
+                .take(10) // Limit to 10 for performance
+                .map(
+                  (bytes) => Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.all(1),
+                      child: Image.memory(
+                        bytes,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        errorBuilder: (context, error, stack) {
+                          print('[ClipWidget] Image error: $error');
+                          return Container(color: Colors.red); // red = image decode error
+                        },
+                      ),
+                    ),
                   ),
-                ),
-              )
-              .toList(),
+                )
+                .toList(),
+          ),
         );
       },
       loading: () {
