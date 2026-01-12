@@ -30,7 +30,7 @@ eriui/
 
 - **Bundled ComfyUI**: EriUI includes its own ComfyUI installation. This ensures users don't need external dependencies like SwarmUI. Models can be configured via `extra_model_paths.yaml`.
 
-- **Unified Training**: Instead of requiring users to install OneTrainer separately, EriUI provides a complete training interface that connects to the OneTrainer API.
+- **Unified Training**: EriUI integrates with OneTrainer at `/home/alex/OneTrainer` for the training backend. The Trainer tab provides a complete training interface that connects to the OneTrainer API.
 
 - **Single Install**: Users install EriUI once and have access to all features - generation, workflows, training, and model management.
 
