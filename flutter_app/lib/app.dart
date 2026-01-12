@@ -25,6 +25,7 @@ import 'features/regional/regional_prompt_editor.dart';
 // Workflow browser and editor
 import 'features/workflow_browser/workflow_browser_screen.dart';
 import 'features/workflow_editor/visual_workflow_editor.dart';
+import 'features/vid_train_prep/vid_train_prep_screen.dart';
 import 'widgets/app_shell.dart';
 import 'providers/theme_provider.dart';
 
@@ -160,6 +161,13 @@ final _router = GoRouter(
           name: 'merger',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: ModelMergerScreen(),
+          ),
+        ),
+        GoRoute(
+          path: '/tools/vid-train-prep',
+          name: 'vid-train-prep',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: VidTrainPrepScreen(),
           ),
         ),
         // Other screens

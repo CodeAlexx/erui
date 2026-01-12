@@ -132,6 +132,7 @@ class _UtilitiesDropdown extends StatelessWidget {
         _buildMenuItem(context, 'Image Interrogator', Icons.psychology, '/tools/interrogator'),
         _buildMenuItem(context, 'Model Comparison', Icons.compare, '/tools/compare'),
         _buildMenuItem(context, 'Model Merger', Icons.merge, '/tools/merger'),
+        _buildMenuItem(context, 'Video Train Prep', Icons.video_settings, '/tools/vid-train-prep'),
         const PopupMenuDivider(),
         _buildMenuItem(context, 'Wildcards', Icons.shuffle, '/wildcards'),
         _buildMenuItem(context, 'Regional Prompts', Icons.crop_free, '/regional'),
