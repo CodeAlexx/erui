@@ -60,7 +60,7 @@ SERVICES = {
     "comfyui": Service(
         name="comfyui",
         port=8199,
-        start_cmd=["python", "main.py", "--port", "8199", "--listen", "0.0.0.0"],
+        start_cmd=["python", "main.py", "--port", "8199", "--listen", "0.0.0.0", "--lowvram"],
         cwd=COMFYUI_DIR,
         env_setup="source venv/bin/activate",
     ),

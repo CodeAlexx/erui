@@ -330,7 +330,54 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
         filenamePrefix: 'ERI_hires',
       );
     } else {
+      // Detect model type for specialized workflows
+      final modelLower = modelToUse.toLowerCase();
+
+      // Flux models - need UNETLoader + DualCLIP + CLIPTextEncodeFlux
+      if (modelLower.contains('flux')) {
+        return builder.buildFlux(
+          model: modelToUse,
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt,
+          width: params.width,
+          height: params.height,
+          steps: params.steps,
+          guidance: params.cfgScale,  // Flux uses guidance, not CFG
+          seed: params.seed,
+          sampler: params.sampler,
+          scheduler: params.scheduler,
+          batchSize: params.batchSize,
+          vae: params.vae,
+          initImageBase64: params.initImage,
+          denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+          filenamePrefix: 'ERI_flux',
+        );
+      }
+
+      // SD3.5 models - need UNETLoader + TripleCLIP + CLIPTextEncodeSD3
+      if (modelLower.contains('sd3') || modelLower.contains('sd_3') ||
+          modelLower.contains('stable-diffusion-3') || modelLower.contains('stablediffusion3')) {
+        return builder.buildSD35(
+          model: modelToUse,
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt,
+          width: params.width,
+          height: params.height,
+          steps: params.steps,
+          cfg: params.cfgScale,
+          seed: params.seed,
+          sampler: params.sampler,
+          scheduler: params.scheduler,
+          batchSize: params.batchSize,
+          vae: params.vae,
+          initImageBase64: params.initImage,
+          denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+          filenamePrefix: 'ERI_sd35',
+        );
+      }
+
       // Standard text2image workflow (also handles img2img)
+      // Works for SDXL, SD1.5, and other checkpoint-based models
       return builder.buildText2Image(
         model: modelToUse,
         prompt: params.prompt,

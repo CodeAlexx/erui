@@ -388,35 +388,41 @@ class _MediaGridItemState extends State<_MediaGridItem> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Draggable<MediaDragData>(
-      data: MediaDragData(
-        media: widget.media,
-        clipType: _clipType,
-      ),
-      onDragStarted: () {
-        print('DEBUG: Drag started for ${widget.media.fileName}');
-      },
-      onDragEnd: (details) {
-        print('DEBUG: Drag ended, wasAccepted: ${details.wasAccepted}');
-      },
-      onDraggableCanceled: (velocity, offset) {
-        print('DEBUG: Drag cancelled at $offset');
-      },
-      feedback: _buildDragFeedback(context, colorScheme),
-      childWhenDragging: Opacity(
-        opacity: 0.5,
-        child: _buildItemContent(context, colorScheme),
-      ),
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _isHovered = true),
-        onExit: (_) => setState(() => _isHovered = false),
-        child: GestureDetector(
+    // Use InkWell for reliable tap detection, wrapped around Draggable
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
           onTap: widget.onTap,
           onDoubleTap: widget.onDoubleTap,
           onSecondaryTapUp: (details) {
             widget.onContextMenu(details.globalPosition);
           },
-          child: _buildItemContent(context, colorScheme),
+          borderRadius: BorderRadius.circular(8),
+          child: Draggable<MediaDragData>(
+            data: MediaDragData(
+              media: widget.media,
+              clipType: _clipType,
+            ),
+            dragAnchorStrategy: pointerDragAnchorStrategy,
+            onDragStarted: () {
+              print('DEBUG: Drag started for ${widget.media.fileName}');
+            },
+            onDragEnd: (details) {
+              print('DEBUG: Drag ended, wasAccepted: ${details.wasAccepted}');
+            },
+            onDraggableCanceled: (velocity, offset) {
+              print('DEBUG: Drag cancelled at $offset');
+            },
+            feedback: _buildDragFeedback(context, colorScheme),
+            childWhenDragging: Opacity(
+              opacity: 0.5,
+              child: _buildItemContent(context, colorScheme),
+            ),
+            child: _buildItemContent(context, colorScheme),
+          ),
         ),
       ),
     );

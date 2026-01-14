@@ -36,7 +36,8 @@ class ClipThumbnailCache {
   final Map<String, Completer<List<Uint8List>>> _pendingExtractions = {};
 
   /// Thumbnail height (width is calculated from aspect ratio)
-  static const int thumbnailHeight = 48;
+  /// Use 64px for better quality and visibility
+  static const int thumbnailHeight = 64;
 
   /// Number of thumbnails to extract per clip (based on clip width)
   static int getThumbnailCount(double clipWidthPixels) {
@@ -116,12 +117,32 @@ final clipThumbnailCacheProvider = Provider<ClipThumbnailCache>((ref) {
 });
 
 /// Provider to get thumbnails for a specific clip
+/// Uses clipId as key (not the whole clip object) to prevent cache invalidation on rebuild
 final clipThumbnailsProvider = FutureProvider.family<List<Uint8List>, ({EditorClip clip, int count})>(
   (ref, params) async {
     final cache = ref.watch(clipThumbnailCacheProvider);
-    return cache.extractThumbnails(
+    print('[Provider] clipThumbnailsProvider called for ${params.clip.id}');
+    final result = await cache.extractThumbnails(
       clip: params.clip,
       thumbnailCount: params.count,
     );
+    print('[Provider] Returning ${result.length} thumbnails for ${params.clip.id}');
+    return result;
+  },
+);
+
+/// Alternative provider keyed by clip ID string for stable caching
+final clipThumbnailsByIdProvider = FutureProvider.family<List<Uint8List>, String>(
+  (ref, clipId) async {
+    final cache = ref.watch(clipThumbnailCacheProvider);
+    // Return cached thumbnails directly if available
+    final cached = cache.getThumbnails(clipId);
+    if (cached != null) {
+      print('[Provider] Returning cached thumbnails for $clipId');
+      return cached;
+    }
+    // If not cached, return empty - extraction must be triggered separately
+    print('[Provider] No cached thumbnails for $clipId');
+    return [];
   },
 );

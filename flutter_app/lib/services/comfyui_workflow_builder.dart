@@ -403,6 +403,274 @@ class ComfyUIWorkflowBuilder {
     return Map<String, dynamic>.from(_workflow);
   }
 
+  /// Build a Flux image generation workflow
+  ///
+  /// Flux models require:
+  /// - UNETLoader for diffusion_models path
+  /// - DualCLIPLoader for clip_l + t5xxl
+  /// - CLIPTextEncodeFlux for prompt encoding with guidance
+  /// - EmptyFlux2LatentImage for 128-channel latent at /16 compression
+  /// - Flux2Scheduler for optimal timestep scheduling
+  Map<String, dynamic> buildFlux({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 20,
+    double guidance = 3.5,
+    int seed = -1,
+    String sampler = 'euler',
+    String scheduler = 'simple',
+    int batchSize = 1,
+    String? vae,
+    String clipL = 'clip_l.safetensors',
+    String clipT5 = 't5xxl_fp16.safetensors',
+    String? initImageBase64,
+    double denoise = 1.0,
+    String filenamePrefix = 'ERI_flux',
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Load Flux model using UNETLoader (diffusion_models path)
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+    });
+    _modelOutput = 0;
+
+    // Load dual CLIP (clip_l + t5xxl) for Flux
+    _clipNode = _addNode('DualCLIPLoader', {
+      'clip_name1': clipL,
+      'clip_name2': clipT5,
+      'type': 'flux',
+    });
+    _clipOutput = 0;
+
+    // Load VAE (ae.safetensors for Flux)
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae ?? 'ae.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using CLIPTextEncodeFlux with guidance
+    // Note: For Flux, we pass the same prompt to both clip_l and t5xxl inputs
+    _positiveNode = _addNode('CLIPTextEncodeFlux', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip_l': prompt,
+      't5xxl': prompt,
+      'guidance': guidance,
+    });
+
+    // Negative prompt - for Flux we use empty or minimal guidance
+    _negativeNode = _addNode('CLIPTextEncodeFlux', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip_l': negativePrompt,
+      't5xxl': negativePrompt,
+      'guidance': guidance,
+    });
+
+    // Create latent - img2img or empty
+    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
+      // Image-to-image mode
+      final loadImageNode = _addNode('LoadImageBase64', {
+        'image': initImageBase64,
+      });
+
+      final resizeNode = _addNode('ImageResize', {
+        'image': _nodeRef(loadImageNode, 0),
+        'width': width,
+        'height': height,
+        'interpolation': 'bicubic',
+        'method': 'fill / crop',
+        'condition': 'always',
+      });
+
+      _latentNode = _addNode('VAEEncode', {
+        'pixels': _nodeRef(resizeNode, 0),
+        'vae': _nodeRef(_vaeNode, _vaeOutput),
+      });
+    } else {
+      // Text-to-image mode - use Flux-specific latent (128 channels, /16)
+      _latentNode = _addNode('EmptyFlux2LatentImage', {
+        'width': width,
+        'height': height,
+        'batch_size': batchSize,
+      });
+    }
+
+    // Use Flux2Scheduler for optimal timestep calculation
+    final schedulerNode = _addNode('Flux2Scheduler', {
+      'steps': steps,
+      'width': width,
+      'height': height,
+    });
+
+    // Use BasicScheduler as fallback sampler setup
+    final samplerSelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': sampler,
+    });
+
+    // Create noise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // Create guider (for CFG-like behavior)
+    final guiderNode = _addNode('BasicGuider', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'conditioning': _nodeRef(_positiveNode, 0),
+    });
+
+    // Sample using SamplerCustomAdvanced
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerSelectNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
+  /// Build an SD3.5 image generation workflow
+  ///
+  /// SD3.5 models require:
+  /// - UNETLoader for diffusion_models path
+  /// - TripleCLIPLoader for clip_l + clip_g + t5xxl
+  /// - CLIPTextEncodeSD3 for prompt encoding
+  /// - EmptySD3LatentImage for 16-channel latent
+  Map<String, dynamic> buildSD35({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 28,
+    double cfg = 4.5,
+    int seed = -1,
+    String sampler = 'euler',
+    String scheduler = 'simple',
+    int batchSize = 1,
+    String? vae,
+    String clipL = 'clip_l.safetensors',
+    String clipG = 'clip_g.safetensors',
+    String clipT5 = 't5xxl_fp16.safetensors',
+    String? initImageBase64,
+    double denoise = 1.0,
+    String filenamePrefix = 'ERI_sd35',
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Load SD3.5 model using UNETLoader (diffusion_models path)
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+    });
+    _modelOutput = 0;
+
+    // Load triple CLIP (clip_l + clip_g + t5xxl) for SD3
+    _clipNode = _addNode('TripleCLIPLoader', {
+      'clip_name1': clipL,
+      'clip_name2': clipG,
+      'clip_name3': clipT5,
+    });
+    _clipOutput = 0;
+
+    // Load VAE
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae ?? 'ae.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using CLIPTextEncodeSD3
+    _positiveNode = _addNode('CLIPTextEncodeSD3', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip_l': prompt,
+      'clip_g': prompt,
+      't5xxl': prompt,
+      'empty_padding': 'none',
+    });
+
+    _negativeNode = _addNode('CLIPTextEncodeSD3', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip_l': negativePrompt,
+      'clip_g': negativePrompt,
+      't5xxl': negativePrompt,
+      'empty_padding': 'none',
+    });
+
+    // Create latent - img2img or empty
+    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
+      // Image-to-image mode
+      final loadImageNode = _addNode('LoadImageBase64', {
+        'image': initImageBase64,
+      });
+
+      final resizeNode = _addNode('ImageResize', {
+        'image': _nodeRef(loadImageNode, 0),
+        'width': width,
+        'height': height,
+        'interpolation': 'bicubic',
+        'method': 'fill / crop',
+        'condition': 'always',
+      });
+
+      _latentNode = _addNode('VAEEncode', {
+        'pixels': _nodeRef(resizeNode, 0),
+        'vae': _nodeRef(_vaeNode, _vaeOutput),
+      });
+    } else {
+      // Text-to-image mode - use SD3-specific latent (16 channels)
+      _latentNode = _addNode('EmptySD3LatentImage', {
+        'width': width,
+        'height': height,
+        'batch_size': batchSize,
+      });
+    }
+
+    // Standard KSampler for SD3.5
+    _samplerNode = _addNode('KSampler', {
+      'seed': resolvedSeed,
+      'steps': steps,
+      'cfg': cfg,
+      'sampler_name': sampler,
+      'scheduler': scheduler,
+      'denoise': denoise,
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
   /// Build a high-resolution fix (hires) workflow
   ///
   /// First pass at lower resolution, then upscale and refine
@@ -1226,19 +1494,23 @@ class ComfyUIWorkflowBuilder {
   // VIDEO GENERATION WORKFLOWS
   // ============================================================================
 
-  /// Build an LTX Video workflow
+  /// Build an LTX-2 Video workflow matching official Lightricks workflow
   ///
-  /// Based exactly on the reference ltx2.json workflow structure.
-  /// Uses LTXVGemmaCLIPModelLoader, LTXVScheduler, SamplerCustomAdvanced, etc.
+  /// Two-stage sampling with latent upscale:
+  /// - Stage 1: Base sampling with LTXVScheduler (20 steps, cfg=4)
+  /// - Stage 2: Refinement after 2x upscale with ManualSigmas (4 steps, cfg=1)
+  /// - LoRAs applied for stage 2 refinement
+  /// - VAEDecodeTiled for low VRAM decoding
+  /// - CreateVideo + SaveVideo for mp4 output
   Map<String, dynamic> buildLTXVideo({
     required String model,
     required String prompt,
     String negativePrompt = '',
-    int width = 768,
-    int height = 512,
-    int frames = 97,
+    int width = 1280,
+    int height = 720,
+    int frames = 121,
     int steps = 20,
-    double cfg = 3.0,
+    double cfg = 4.0,
     int seed = -1,
     int fps = 24,
     String? initImageBase64,
@@ -1250,7 +1522,9 @@ class ComfyUIWorkflowBuilder {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // Node 1: Load checkpoint
+    // === MODEL SECTION ===
+
+    // Load checkpoint (LTX-2 model)
     final checkpointNode = _addNode('CheckpointLoaderSimple', {
       'ckpt_name': model,
     });
@@ -1259,65 +1533,83 @@ class ComfyUIWorkflowBuilder {
     _vaeNode = checkpointNode;
     _vaeOutput = 2;
 
-    // Node 2: LTXVGemmaCLIPModelLoader - loads Gemma 3 text encoder
-    final clipNode = _addNode('LTXVGemmaCLIPModelLoader', {
-      'gemma_path': 'gemma_combined/model/model.safetensors',
-      'ltxv_path': model,
-      'max_length': 1024,
+    // LTX AV Text Encoder Loader (uses gemma text encoder)
+    final textEncoderNode = _addNode('LTXAVTextEncoderLoader', {
+      'text_encoder': 'gemma_3_12B_it.safetensors',
+      'ckpt_name': model,
+    });
+    _clipNode = textEncoderNode;
+    _clipOutput = 0;
+
+    // LTX Audio VAE Loader (from same checkpoint)
+    final audioVaeNode = _addNode('LTXVAudioVAELoader', {
+      'ckpt_name': model,
     });
 
-    // Apply LoRAs if provided (use LoraLoaderModelOnly for video models)
-    if (loras != null && loras.isNotEmpty) {
-      for (final lora in loras) {
-        final loraNode = _addNode('LoraLoaderModelOnly', {
-          'lora_name': lora.name,
-          'strength_model': lora.modelStrength,
-          'model': _nodeRef(_modelNode, _modelOutput),
-        });
-        _modelNode = loraNode;
-        _modelOutput = 0;
-      }
-    }
+    // === PROMPT SECTION ===
 
-    // Node 3: Positive prompt encoding
+    // CLIP Text Encode (Positive)
     _positiveNode = _addNode('CLIPTextEncode', {
       'text': prompt,
-      'clip': _nodeRef(clipNode, 0),
+      'clip': _nodeRef(_clipNode, _clipOutput),
     });
 
-    // Node 4: Negative prompt encoding
+    // CLIP Text Encode (Negative)
     _negativeNode = _addNode('CLIPTextEncode', {
       'text': negativePrompt,
-      'clip': _nodeRef(clipNode, 0),
+      'clip': _nodeRef(_clipNode, _clipOutput),
     });
 
-    // Node 8: KSamplerSelect
-    final samplerSelectNode = _addNode('KSamplerSelect', {
-      'sampler_name': 'euler',
-    });
-
-    // Node 11: RandomNoise
-    final noiseNode = _addNode('RandomNoise', {
-      'noise_seed': resolvedSeed,
-    });
-
-    // Node 22: LTXVConditioning - adds frame rate to conditioning
+    // LTXVConditioning - adds frame rate
     final conditioningNode = _addNode('LTXVConditioning', {
       'frame_rate': fps.toDouble(),
       'positive': _nodeRef(_positiveNode, 0),
       'negative': _nodeRef(_negativeNode, 0),
     });
 
-    // Node 43: EmptyLTXVLatentVideo
-    _latentNode = _addNode('EmptyLTXVLatentVideo', {
-      'width': width,
-      'height': height,
+    // === LATENT SETUP ===
+
+    // Calculate scaled dimensions for initial latent (will be upscaled 2x)
+    final scaledWidth = (width / 2).round();
+    final scaledHeight = (height / 2).round();
+
+    // EmptyLTXVLatentVideo
+    final emptyVideoLatentNode = _addNode('EmptyLTXVLatentVideo', {
+      'width': scaledWidth,
+      'height': scaledHeight,
       'length': frames,
       'batch_size': 1,
     });
 
-    // Node 9: LTXVScheduler
-    final schedulerNode = _addNode('LTXVScheduler', {
+    // LTXVEmptyLatentAudio
+    final emptyAudioLatentNode = _addNode('LTXVEmptyLatentAudio', {
+      'audio_vae': _nodeRef(audioVaeNode, 0),
+      'frames_number': frames,
+      'frame_rate': fps,
+      'batch_size': 1,
+    });
+
+    // LTXVConcatAVLatent - combine video + audio latents
+    final combinedLatentNode = _addNode('LTXVConcatAVLatent', {
+      'video_latent': _nodeRef(emptyVideoLatentNode, 0),
+      'audio_latent': _nodeRef(emptyAudioLatentNode, 0),
+    });
+    _latentNode = combinedLatentNode;
+
+    // === STAGE 1 SAMPLING (Base) ===
+
+    // RandomNoise for stage 1
+    final noise1Node = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // KSamplerSelect for stage 1
+    final sampler1SelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': 'euler_ancestral',
+    });
+
+    // LTXVScheduler for stage 1
+    final scheduler1Node = _addNode('LTXVScheduler', {
       'steps': steps,
       'max_shift': 2.05,
       'base_shift': 0.95,
@@ -1326,54 +1618,140 @@ class ComfyUIWorkflowBuilder {
       'latent': _nodeRef(_latentNode, 0),
     });
 
-    // Node 18: GuiderParameters for video
-    final guiderParamsNode = _addNode('GuiderParameters', {
-      'modality': 'VIDEO',
+    // CFGGuider for stage 1 (cfg=4)
+    final guider1Node = _addNode('CFGGuider', {
       'cfg': cfg,
-      'stg': 0.0,
-      'rescale': 0.0,
-      'modality_scale': cfg,
-      'cross_attn': 1.0,
-      'skip_step': 0,
-      'perturb_attn': 0.0,
-    });
-
-    // Node 17: MultimodalGuider
-    final guiderNode = _addNode('MultimodalGuider', {
-      'skip_blocks': '29',
       'model': _nodeRef(_modelNode, _modelOutput),
       'positive': _nodeRef(conditioningNode, 0),
       'negative': _nodeRef(conditioningNode, 1),
-      'parameters': _nodeRef(guiderParamsNode, 0),
     });
 
-    // Node 41: SamplerCustomAdvanced
-    _samplerNode = _addNode('SamplerCustomAdvanced', {
-      'noise': _nodeRef(noiseNode, 0),
-      'guider': _nodeRef(guiderNode, 0),
-      'sampler': _nodeRef(samplerSelectNode, 0),
-      'sigmas': _nodeRef(schedulerNode, 0),
+    // SamplerCustomAdvanced - Stage 1
+    final sampler1Node = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noise1Node, 0),
+      'guider': _nodeRef(guider1Node, 0),
+      'sampler': _nodeRef(sampler1SelectNode, 0),
+      'sigmas': _nodeRef(scheduler1Node, 0),
       'latent_image': _nodeRef(_latentNode, 0),
     });
 
-    // Node 12: VAE Decode
-    _imageNode = _addNode('VAEDecode', {
-      'samples': _nodeRef(_samplerNode, 0),
+    // === STAGE 1 POST-PROCESSING ===
+
+    // LTXVSeparateAVLatent - separate video/audio after stage 1
+    final separate1Node = _addNode('LTXVSeparateAVLatent', {
+      'av_latent': _nodeRef(sampler1Node, 0),
+    });
+
+    // LTXVCropGuides
+    final cropGuidesNode = _addNode('LTXVCropGuides', {
+      'positive': _nodeRef(conditioningNode, 0),
+      'negative': _nodeRef(conditioningNode, 1),
+      'latent': _nodeRef(separate1Node, 0),
+    });
+
+    // LatentUpscaleModelLoader
+    final upscaleModelNode = _addNode('LatentUpscaleModelLoader', {
+      'model_name': 'ltx-2-spatial-upscaler-x2-1.0.safetensors',
+    });
+
+    // LTXVLatentUpsampler - 2x spatial upscale
+    final upscaledLatentNode = _addNode('LTXVLatentUpsampler', {
+      'samples': _nodeRef(cropGuidesNode, 2),
+      'upscale_model': _nodeRef(upscaleModelNode, 0),
       'vae': _nodeRef(_vaeNode, _vaeOutput),
     });
 
-    // VHS_VideoCombine - combine frames to video
-    _addNode('VHS_VideoCombine', {
+    // LTXVConcatAVLatent - recombine with audio
+    final recombinedLatentNode = _addNode('LTXVConcatAVLatent', {
+      'video_latent': _nodeRef(upscaledLatentNode, 0),
+      'audio_latent': _nodeRef(separate1Node, 1),
+    });
+
+    // === STAGE 2 SAMPLING (Refinement with LoRAs) ===
+
+    // Apply LoRAs for stage 2 (model only, not clip)
+    var stage2Model = _modelNode;
+    var stage2ModelOutput = _modelOutput;
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'model': _nodeRef(stage2Model, stage2ModelOutput),
+        });
+        stage2Model = loraNode;
+        stage2ModelOutput = 0;
+      }
+    }
+
+    // RandomNoise for stage 2 (fixed seed 0)
+    final noise2Node = _addNode('RandomNoise', {
+      'noise_seed': 0,
+    });
+
+    // KSamplerSelect for stage 2
+    final sampler2SelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': 'euler_ancestral',
+    });
+
+    // ManualSigmas for stage 2 (4 refinement steps)
+    final manualSigmasNode = _addNode('ManualSigmas', {
+      'sigmas_string': '0.909375, 0.725, 0.421875, 0.0',
+    });
+
+    // CFGGuider for stage 2 (cfg=1 for refinement)
+    final guider2Node = _addNode('CFGGuider', {
+      'cfg': 1.0,
+      'model': _nodeRef(stage2Model, stage2ModelOutput),
+      'positive': _nodeRef(cropGuidesNode, 0),
+      'negative': _nodeRef(cropGuidesNode, 1),
+    });
+
+    // SamplerCustomAdvanced - Stage 2
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noise2Node, 0),
+      'guider': _nodeRef(guider2Node, 0),
+      'sampler': _nodeRef(sampler2SelectNode, 0),
+      'sigmas': _nodeRef(manualSigmasNode, 0),
+      'latent_image': _nodeRef(recombinedLatentNode, 0),
+    });
+
+    // === DECODE & OUTPUT ===
+
+    // LTXVSeparateAVLatent - final separate
+    final finalSeparateNode = _addNode('LTXVSeparateAVLatent', {
+      'av_latent': _nodeRef(_samplerNode, 1), // denoised_output
+    });
+
+    // VAEDecodeTiled for video (low VRAM)
+    _imageNode = _addNode('VAEDecodeTiled', {
+      'samples': _nodeRef(finalSeparateNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+      'tile_size': 512,
+      'overlap': 64,
+      'temporal_size': 4096,
+      'temporal_overlap': 8,
+    });
+
+    // LTXVAudioVAEDecode for audio
+    final audioDecodeNode = _addNode('LTXVAudioVAEDecode', {
+      'samples': _nodeRef(finalSeparateNode, 1),
+      'audio_vae': _nodeRef(audioVaeNode, 0),
+    });
+
+    // CreateVideo - combine images + audio
+    final createVideoNode = _addNode('CreateVideo', {
       'images': _nodeRef(_imageNode, 0),
-      'frame_rate': fps,
-      'loop_count': 0,
+      'audio': _nodeRef(audioDecodeNode, 0),
+      'fps': fps.toDouble(),
+    });
+
+    // SaveVideo - output as mp4
+    _addNode('SaveVideo', {
+      'video': _nodeRef(createVideoNode, 0),
       'filename_prefix': filenamePrefix,
-      'format': 'video/h264-mp4',
-      'pix_fmt': 'yuv420p',
-      'crf': 19,
-      'save_metadata': true,
-      'pingpong': false,
-      'save_output': true,
+      'format': 'mp4',
+      'codec': 'auto',
     });
 
     return Map<String, dynamic>.from(_workflow);
@@ -1383,6 +1761,7 @@ class ComfyUIWorkflowBuilder {
   ///
   /// Wan uses a dual-model approach: high_noise model for early denoising steps
   /// and low_noise model for later refinement steps.
+  /// Models are in diffusion_models/ directory, not checkpoints.
   Map<String, dynamic> buildWanVideo({
     required String highNoiseModel,
     required String lowNoiseModel,
@@ -1399,28 +1778,43 @@ class ComfyUIWorkflowBuilder {
     double switchRatio = 0.5,
     String filenamePrefix = 'ERI_wan_video',
     String outputFormat = 'video/webp',
+    String clipModel = 't5xxl_fp16.safetensors',
+    String? vaeModel, // Auto-detect based on model version
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
     final switchStep = (steps * switchRatio).round();
 
-    // Load high noise model (for early steps)
-    final highNoiseCheckpoint = _addNode('CheckpointLoaderSimple', {
-      'ckpt_name': highNoiseModel,
+    // Detect Wan version (2.1 vs 2.2) from model name
+    final isWan22 = highNoiseModel.toLowerCase().contains('wan2.2') ||
+        highNoiseModel.toLowerCase().contains('wan22');
+    final autoVae = isWan22 ? 'wan2.2_vae.safetensors' : 'wan_2.1_vae.safetensors';
+    final resolvedVae = vaeModel ?? autoVae;
+
+    // Load high noise model using UNETLoader (diffusion_models path)
+    final highNoiseUnet = _addNode('UNETLoader', {
+      'unet_name': highNoiseModel,
     });
 
-    // Load low noise model (for later steps)
-    final lowNoiseCheckpoint = _addNode('CheckpointLoaderSimple', {
-      'ckpt_name': lowNoiseModel,
+    // Load low noise model using UNETLoader
+    final lowNoiseUnet = _addNode('UNETLoader', {
+      'unet_name': lowNoiseModel,
     });
 
-    // Use high noise model's CLIP and VAE
-    _clipNode = highNoiseCheckpoint;
-    _clipOutput = 1;
-    _vaeNode = highNoiseCheckpoint;
-    _vaeOutput = 2;
+    // Load CLIP text encoder (T5)
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': clipModel,
+      'type': 'wan',
+    });
+    _clipOutput = 0;
 
-    // Encode prompts
+    // Load VAE
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': resolvedVae,
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using standard CLIPTextEncode
     _positiveNode = _addNode('CLIPTextEncode', {
       'text': prompt,
       'clip': _nodeRef(_clipNode, _clipOutput),
@@ -1431,14 +1825,14 @@ class ComfyUIWorkflowBuilder {
       'clip': _nodeRef(_clipNode, _clipOutput),
     });
 
-    // Create latent based on mode
+    // Handle start image for I2V mode
+    String? startImageNode;
     if (initImageBase64 != null && initImageBase64.isNotEmpty) {
-      // Image-to-video mode
       final loadImageNode = _addNode('LoadImageBase64', {
         'image': initImageBase64,
       });
 
-      final resizeNode = _addNode('ImageResize', {
+      startImageNode = _addNode('ImageResize', {
         'image': _nodeRef(loadImageNode, 0),
         'width': width,
         'height': height,
@@ -1446,24 +1840,29 @@ class ComfyUIWorkflowBuilder {
         'method': 'fill / crop',
         'condition': 'always',
       });
-
-      final encodedLatent = _addNode('VAEEncode', {
-        'pixels': _nodeRef(resizeNode, 0),
-        'vae': _nodeRef(_vaeNode, _vaeOutput),
-      });
-
-      _latentNode = _addNode('RepeatLatentBatch', {
-        'samples': _nodeRef(encodedLatent, 0),
-        'amount': frames,
-      });
-    } else {
-      // Text-to-video mode
-      _latentNode = _addNode('EmptyLatentImage', {
-        'width': width,
-        'height': height,
-        'batch_size': frames,
-      });
     }
+
+    // Use WanImageToVideo node for proper video latent + conditioning
+    // This creates the correct 5D video latent and handles I2V conditioning
+    final wanI2V = _addNode('WanImageToVideo', {
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+      'width': width,
+      'height': height,
+      'length': frames,
+      'batch_size': 1,
+      if (startImageNode != null) 'start_image': _nodeRef(startImageNode, 0),
+    });
+
+    // Get conditioned outputs from WanImageToVideo
+    // Output 0: positive (conditioned), Output 1: negative (conditioned), Output 2: latent
+    final conditionedPositive = wanI2V;
+    const conditionedPositiveOutput = 0;
+    final conditionedNegative = wanI2V;
+    const conditionedNegativeOutput = 1;
+    _latentNode = wanI2V;
+    const latentOutput = 2;
 
     // First pass with high noise model (early steps)
     final highNoiseSampler = _addNode('KSamplerAdvanced', {
@@ -1476,10 +1875,10 @@ class ComfyUIWorkflowBuilder {
       'end_at_step': switchStep,
       'add_noise': 'enable',
       'return_with_leftover_noise': 'enable',
-      'model': _nodeRef(highNoiseCheckpoint, 0),
-      'positive': _nodeRef(_positiveNode, 0),
-      'negative': _nodeRef(_negativeNode, 0),
-      'latent_image': _nodeRef(_latentNode, 0),
+      'model': _nodeRef(highNoiseUnet, 0),
+      'positive': _nodeRef(conditionedPositive, conditionedPositiveOutput),
+      'negative': _nodeRef(conditionedNegative, conditionedNegativeOutput),
+      'latent_image': _nodeRef(_latentNode, latentOutput),
     });
 
     // Second pass with low noise model (later steps)
@@ -1493,9 +1892,9 @@ class ComfyUIWorkflowBuilder {
       'end_at_step': steps,
       'add_noise': 'disable',
       'return_with_leftover_noise': 'disable',
-      'model': _nodeRef(lowNoiseCheckpoint, 0),
-      'positive': _nodeRef(_positiveNode, 0),
-      'negative': _nodeRef(_negativeNode, 0),
+      'model': _nodeRef(lowNoiseUnet, 0),
+      'positive': _nodeRef(conditionedPositive, conditionedPositiveOutput),
+      'negative': _nodeRef(conditionedNegative, conditionedNegativeOutput),
       'latent_image': _nodeRef(highNoiseSampler, 0),
     });
 
@@ -1505,7 +1904,7 @@ class ComfyUIWorkflowBuilder {
       'vae': _nodeRef(_vaeNode, _vaeOutput),
     });
 
-    // Combine frames to video
+    // Combine frames to video using VHS_VideoCombine
     _addNode('VHS_VideoCombine', {
       'images': _nodeRef(_imageNode, 0),
       'frame_rate': fps,
@@ -1522,6 +1921,7 @@ class ComfyUIWorkflowBuilder {
   /// Build a Hunyuan Video workflow
   ///
   /// Hunyuan Video is a high-quality video generation model from Tencent.
+  /// Uses proper Hunyuan-specific nodes for video latent and I2V conditioning.
   Map<String, dynamic> buildHunyuanVideo({
     required String model,
     required String prompt,
@@ -1536,18 +1936,30 @@ class ComfyUIWorkflowBuilder {
     String? initImageBase64,
     String filenamePrefix = 'ERI_hunyuan_video',
     String outputFormat = 'video/webp',
+    String vaeModel = 'hunyuan_video_vae_bf16.safetensors',
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // Load Hunyuan model
-    _modelNode = _addNode('CheckpointLoaderSimple', {
-      'ckpt_name': model,
+    // Load Hunyuan model using UNETLoader (diffusion_models path)
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
     });
-    _clipNode = _modelNode;
-    _clipOutput = 1;
-    _vaeNode = _modelNode;
-    _vaeOutput = 2;
+    _modelOutput = 0;
+
+    // Load CLIP (Hunyuan uses llava-style CLIP)
+    // For now, try using a standard text encoder approach
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': 't5xxl_fp16.safetensors',
+      'type': 'sd3',  // Hunyuan uses similar text encoding
+    });
+    _clipOutput = 0;
+
+    // Load VAE
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vaeModel,
+    });
+    _vaeOutput = 0;
 
     // Encode prompts
     _positiveNode = _addNode('CLIPTextEncode', {
@@ -1560,9 +1972,12 @@ class ComfyUIWorkflowBuilder {
       'clip': _nodeRef(_clipNode, _clipOutput),
     });
 
-    // Create latent based on mode
+    // Handle I2V mode using HunyuanImageToVideo node
+    String conditionedPositive;
+    int conditionedPositiveOutput;
+
     if (initImageBase64 != null && initImageBase64.isNotEmpty) {
-      // Image-to-video mode
+      // Load and resize start image
       final loadImageNode = _addNode('LoadImageBase64', {
         'image': initImageBase64,
       });
@@ -1576,22 +1991,31 @@ class ComfyUIWorkflowBuilder {
         'condition': 'always',
       });
 
-      final encodedLatent = _addNode('VAEEncode', {
-        'pixels': _nodeRef(resizeNode, 0),
+      // Use HunyuanImageToVideo for I2V mode
+      // This creates proper video latent and conditioning
+      final hunyuanI2V = _addNode('HunyuanImageToVideo', {
+        'positive': _nodeRef(_positiveNode, 0),
         'vae': _nodeRef(_vaeNode, _vaeOutput),
-      });
-
-      _latentNode = _addNode('RepeatLatentBatch', {
-        'samples': _nodeRef(encodedLatent, 0),
-        'amount': frames,
-      });
-    } else {
-      // Text-to-video mode
-      _latentNode = _addNode('EmptyLatentImage', {
         'width': width,
         'height': height,
-        'batch_size': frames,
+        'length': frames,
+        'batch_size': 1,
+        'guidance_type': 'v1 (concat)',
+        'start_image': _nodeRef(resizeNode, 0),
       });
+      conditionedPositive = hunyuanI2V;
+      conditionedPositiveOutput = 0;
+      _latentNode = hunyuanI2V;
+    } else {
+      // Text-to-video mode - use EmptyHunyuanLatentVideo for proper 5D video latent
+      _latentNode = _addNode('EmptyHunyuanLatentVideo', {
+        'width': width,
+        'height': height,
+        'length': frames,
+        'batch_size': 1,
+      });
+      conditionedPositive = _positiveNode;
+      conditionedPositiveOutput = 0;
     }
 
     // KSampler
@@ -1603,9 +2027,9 @@ class ComfyUIWorkflowBuilder {
       'scheduler': 'normal',
       'denoise': 1.0,
       'model': _nodeRef(_modelNode, _modelOutput),
-      'positive': _nodeRef(_positiveNode, 0),
+      'positive': _nodeRef(conditionedPositive, conditionedPositiveOutput),
       'negative': _nodeRef(_negativeNode, 0),
-      'latent_image': _nodeRef(_latentNode, 0),
+      'latent_image': _nodeRef(_latentNode, initImageBase64 != null ? 1 : 0),
     });
 
     // VAE Decode

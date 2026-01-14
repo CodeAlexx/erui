@@ -67,16 +67,28 @@ Future<List<Uint8List>> extractThumbnails({
   }
 
   // Calculate timestamps for thumbnails
-  final duration = clip.duration.inSeconds;
-  final interval = duration / thumbnailCount;
+  // Use sourceDuration (full video length) for better distribution
+  // Fall back to clip.duration if sourceDuration is same (untrimmed clip)
+  final sourceDuration = clip.sourceDuration.inSeconds;
+  final clipDuration = clip.duration.inSeconds;
+
+  // For extracting thumbnails, we want to show frames from the visible portion
+  // of the source (from sourceStart to sourceStart + duration)
+  final visibleDuration = clipDuration > 0 ? clipDuration : sourceDuration;
+  final interval = visibleDuration / thumbnailCount;
+
+  // Add small offset to skip potential black intro frames
+  const introOffset = 0.1;
 
   print('[Native] Extracting $thumbnailCount thumbnails from $localPath');
-  print('[Native] Duration: $duration seconds, interval: $interval seconds');
+  print('[Native] Source duration: $sourceDuration, clip duration: $clipDuration, visible: $visibleDuration');
+  print('[Native] Interval: $interval seconds, intro offset: $introOffset');
 
   final thumbnails = <Uint8List>[];
 
   for (int i = 0; i < thumbnailCount; i++) {
-    final timestamp = clip.sourceStart.inSeconds + (interval * i);
+    // Start from sourceStart + small offset, then space evenly across visible portion
+    final timestamp = clip.sourceStart.inSeconds + introOffset + (interval * i);
     final outputPath = '${outputDir.path}/thumb_$i.jpg';
 
     // Build FFmpeg arguments
@@ -92,15 +104,45 @@ Future<List<Uint8List>> extractThumbnails({
     ];
 
     try {
-      print('[Native] Running: ffmpeg ${args.join(' ')}');
+      print('[Native] Running: ffmpeg -ss $timestamp ...');
       final result = await Process.run('ffmpeg', args);
 
       if (result.exitCode == 0) {
         final file = File(outputPath);
         if (file.existsSync()) {
-          final bytes = await file.readAsBytes();
+          var bytes = await file.readAsBytes();
+          print('[Native] Extracted thumbnail $i at ${timestamp.toStringAsFixed(2)}s: ${bytes.length} bytes');
+
+          // If thumbnail is too small (< 500 bytes), try extracting from further in the source
+          // Note: small square videos (64x64) can be ~1KB, so use lower threshold
+          if (bytes.length < 500 && sourceDuration > 5) {
+            print('[Native] Thumbnail $i too small, trying fallback position...');
+            // Try extracting from 25% into the source video
+            final fallbackTimestamp = sourceDuration * 0.25 + (interval * i);
+            final fallbackArgs = [
+              '-y',
+              '-ss', fallbackTimestamp.toStringAsFixed(3),
+              '-i', localPath,
+              '-vframes', '1',
+              '-vf', 'scale=-1:$thumbnailHeight',
+              '-q:v', '2',  // Higher quality
+              '-update', '1',
+              outputPath,
+            ];
+            final fallbackResult = await Process.run('ffmpeg', fallbackArgs);
+            if (fallbackResult.exitCode == 0) {
+              final fallbackFile = File(outputPath);
+              if (fallbackFile.existsSync()) {
+                final fallbackBytes = await fallbackFile.readAsBytes();
+                if (fallbackBytes.length > bytes.length) {
+                  bytes = fallbackBytes;
+                  print('[Native] Fallback thumbnail $i at ${fallbackTimestamp.toStringAsFixed(2)}s: ${bytes.length} bytes');
+                }
+              }
+            }
+          }
+
           thumbnails.add(bytes);
-          print('[Native] Extracted thumbnail $i: ${bytes.length} bytes');
           // Clean up temp file
           await file.delete();
         }

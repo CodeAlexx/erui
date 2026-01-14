@@ -920,6 +920,36 @@ class ComfyUIService {
             }
           }
         }
+
+        // Check for videos output (plural, SaveVideo uses this)
+        final nodeVideosList = nodeOutput['videos'] as List?;
+        if (nodeVideosList != null) {
+          for (final video in nodeVideosList) {
+            if (video is Map<String, dynamic>) {
+              final filename = video['filename'] as String?;
+              final subfolder = video['subfolder'] as String? ?? '';
+              final type = video['type'] as String? ?? 'output';
+              if (filename != null) {
+                images.add(getImageUrl(filename, subfolder: subfolder, type: type));
+              }
+            }
+          }
+        }
+
+        // Check for files output (generic file output)
+        final nodeFiles = nodeOutput['files'] as List?;
+        if (nodeFiles != null) {
+          for (final file in nodeFiles) {
+            if (file is Map<String, dynamic>) {
+              final filename = file['filename'] as String?;
+              final subfolder = file['subfolder'] as String? ?? '';
+              final type = file['type'] as String? ?? 'output';
+              if (filename != null) {
+                images.add(getImageUrl(filename, subfolder: subfolder, type: type));
+              }
+            }
+          }
+        }
       }
     }
 
