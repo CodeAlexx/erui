@@ -689,6 +689,11 @@ class ComfyUIService {
     return _getModelList('CLIPLoader', 'clip_name');
   }
 
+  /// Get available diffusion models (UNETs) - includes Flux, SD3.5, video models
+  Future<List<String>> getDiffusionModels() async {
+    return _getModelList('UNETLoader', 'unet_name');
+  }
+
   /// Get available samplers
   Future<List<String>> getSamplers() async {
     return _getModelList('KSampler', 'sampler_name');

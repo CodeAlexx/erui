@@ -429,13 +429,17 @@ class ComfyUIWorkflowBuilder {
     String? initImageBase64,
     double denoise = 1.0,
     String filenamePrefix = 'ERI_flux',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
     // Load Flux model using UNETLoader (diffusion_models path)
+    // Detect fp8 models and use appropriate weight dtype
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
     _modelNode = _addNode('UNETLoader', {
       'unet_name': model,
+      'weight_dtype': weightDtype,
     });
     _modelOutput = 0;
 
@@ -446,6 +450,23 @@ class ComfyUIWorkflowBuilder {
       'type': 'flux',
     });
     _clipOutput = 0;
+
+    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
 
     // Load VAE (ae.safetensors for Flux)
     _vaeNode = _addNode('VAELoader', {
@@ -462,12 +483,11 @@ class ComfyUIWorkflowBuilder {
       'guidance': guidance,
     });
 
-    // Negative prompt - for Flux we use empty or minimal guidance
-    _negativeNode = _addNode('CLIPTextEncodeFlux', {
+    // For Flux, negative prompt is typically empty - use standard CLIPTextEncode
+    // Flux doesn't use negative prompts in the traditional sense
+    _negativeNode = _addNode('CLIPTextEncode', {
       'clip': _nodeRef(_clipNode, _clipOutput),
-      'clip_l': negativePrompt,
-      't5xxl': negativePrompt,
-      'guidance': guidance,
+      'text': '',
     });
 
     // Create latent - img2img or empty
@@ -491,43 +511,27 @@ class ComfyUIWorkflowBuilder {
         'vae': _nodeRef(_vaeNode, _vaeOutput),
       });
     } else {
-      // Text-to-image mode - use Flux-specific latent (128 channels, /16)
-      _latentNode = _addNode('EmptyFlux2LatentImage', {
+      // Text-to-image mode - use standard empty latent for Flux 1
+      // Flux 1 works with standard SD latent space
+      _latentNode = _addNode('EmptySD3LatentImage', {
         'width': width,
         'height': height,
         'batch_size': batchSize,
       });
     }
 
-    // Use Flux2Scheduler for optimal timestep calculation
-    final schedulerNode = _addNode('Flux2Scheduler', {
+    // Use standard KSampler - simpler and more reliable for Flux 1
+    // Flux uses guidance embedded in conditioning, CFG=1.0 effectively
+    _samplerNode = _addNode('KSampler', {
+      'seed': resolvedSeed,
       'steps': steps,
-      'width': width,
-      'height': height,
-    });
-
-    // Use BasicScheduler as fallback sampler setup
-    final samplerSelectNode = _addNode('KSamplerSelect', {
+      'cfg': 1.0,  // Flux doesn't use CFG - guidance is in conditioning
       'sampler_name': sampler,
-    });
-
-    // Create noise
-    final noiseNode = _addNode('RandomNoise', {
-      'noise_seed': resolvedSeed,
-    });
-
-    // Create guider (for CFG-like behavior)
-    final guiderNode = _addNode('BasicGuider', {
+      'scheduler': scheduler,
+      'denoise': denoise,
       'model': _nodeRef(_modelNode, _modelOutput),
-      'conditioning': _nodeRef(_positiveNode, 0),
-    });
-
-    // Sample using SamplerCustomAdvanced
-    _samplerNode = _addNode('SamplerCustomAdvanced', {
-      'noise': _nodeRef(noiseNode, 0),
-      'guider': _nodeRef(guiderNode, 0),
-      'sampler': _nodeRef(samplerSelectNode, 0),
-      'sigmas': _nodeRef(schedulerNode, 0),
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
       'latent_image': _nodeRef(_latentNode, 0),
     });
 
@@ -572,13 +576,16 @@ class ComfyUIWorkflowBuilder {
     String? initImageBase64,
     double denoise = 1.0,
     String filenamePrefix = 'ERI_sd35',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
     // Load SD3.5 model using UNETLoader (diffusion_models path)
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
     _modelNode = _addNode('UNETLoader', {
       'unet_name': model,
+      'weight_dtype': weightDtype,
     });
     _modelOutput = 0;
 
@@ -589,6 +596,23 @@ class ComfyUIWorkflowBuilder {
       'clip_name3': clipT5,
     });
     _clipOutput = 0;
+
+    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
 
     // Load VAE
     _vaeNode = _addNode('VAELoader', {
@@ -862,6 +886,7 @@ class ComfyUIWorkflowBuilder {
     // Output
     String filenamePrefix = 'ERI_video',
     String outputFormat = 'video/h264-mp4', // or 'image/gif'
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
@@ -870,10 +895,28 @@ class ComfyUIWorkflowBuilder {
     _modelNode = _addNode('CheckpointLoaderSimple', {
       'ckpt_name': model,
     });
+    _modelOutput = 0;
     _clipNode = _modelNode;
     _clipOutput = 1;
     _vaeNode = _modelNode;
     _vaeOutput = 2;
+
+    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
 
     // Custom VAE
     if (vae != null && vae.isNotEmpty) {
@@ -985,6 +1028,7 @@ class ComfyUIWorkflowBuilder {
     double augmentationLevel = 0.0,
     double minCfg = 1.0,
     String filenamePrefix = 'ERI_svd',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
@@ -999,6 +1043,19 @@ class ComfyUIWorkflowBuilder {
     _clipOutput = 1;
     _vaeNode = checkpointNode;
     _vaeOutput = 2;
+
+    // Apply LoRAs (model only - SVD uses clip_vision not standard CLIP)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+      }
+    }
 
     // Load init image
     final loadImageNode = _addNode('LoadImageBase64', {
@@ -1780,6 +1837,7 @@ class ComfyUIWorkflowBuilder {
     String outputFormat = 'video/webp',
     String clipModel = 't5xxl_fp16.safetensors',
     String? vaeModel, // Auto-detect based on model version
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
@@ -1792,14 +1850,45 @@ class ComfyUIWorkflowBuilder {
     final resolvedVae = vaeModel ?? autoVae;
 
     // Load high noise model using UNETLoader (diffusion_models path)
+    final highWeightDtype = highNoiseModel.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
     final highNoiseUnet = _addNode('UNETLoader', {
       'unet_name': highNoiseModel,
+      'weight_dtype': highWeightDtype,
     });
 
     // Load low noise model using UNETLoader
-    final lowNoiseUnet = _addNode('UNETLoader', {
+    final lowWeightDtype = lowNoiseModel.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
+    var lowNoiseUnet = _addNode('UNETLoader', {
       'unet_name': lowNoiseModel,
+      'weight_dtype': lowWeightDtype,
     });
+
+    // Apply LoRAs to both models (model only, not clip - using LoraLoaderModelOnly)
+    var highNoiseUnetFinal = highNoiseUnet;
+    var highNoiseOutput = 0;
+    var lowNoiseUnetFinal = lowNoiseUnet;
+    var lowNoiseOutput = 0;
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        // Apply to high noise model
+        final loraHighNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(highNoiseUnetFinal, highNoiseOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        highNoiseUnetFinal = loraHighNode;
+        highNoiseOutput = 0;
+
+        // Apply to low noise model
+        final loraLowNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(lowNoiseUnetFinal, lowNoiseOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        lowNoiseUnetFinal = loraLowNode;
+        lowNoiseOutput = 0;
+      }
+    }
 
     // Load CLIP text encoder (T5)
     _clipNode = _addNode('CLIPLoader', {
@@ -1875,7 +1964,7 @@ class ComfyUIWorkflowBuilder {
       'end_at_step': switchStep,
       'add_noise': 'enable',
       'return_with_leftover_noise': 'enable',
-      'model': _nodeRef(highNoiseUnet, 0),
+      'model': _nodeRef(highNoiseUnetFinal, highNoiseOutput),
       'positive': _nodeRef(conditionedPositive, conditionedPositiveOutput),
       'negative': _nodeRef(conditionedNegative, conditionedNegativeOutput),
       'latent_image': _nodeRef(_latentNode, latentOutput),
@@ -1892,7 +1981,7 @@ class ComfyUIWorkflowBuilder {
       'end_at_step': steps,
       'add_noise': 'disable',
       'return_with_leftover_noise': 'disable',
-      'model': _nodeRef(lowNoiseUnet, 0),
+      'model': _nodeRef(lowNoiseUnetFinal, lowNoiseOutput),
       'positive': _nodeRef(conditionedPositive, conditionedPositiveOutput),
       'negative': _nodeRef(conditionedNegative, conditionedNegativeOutput),
       'latent_image': _nodeRef(highNoiseSampler, 0),
@@ -1937,15 +2026,31 @@ class ComfyUIWorkflowBuilder {
     String filenamePrefix = 'ERI_hunyuan_video',
     String outputFormat = 'video/webp',
     String vaeModel = 'hunyuan_video_vae_bf16.safetensors',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
     // Load Hunyuan model using UNETLoader (diffusion_models path)
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
     _modelNode = _addNode('UNETLoader', {
       'unet_name': model,
+      'weight_dtype': weightDtype,
     });
     _modelOutput = 0;
+
+    // Apply LoRAs (model only, not clip - using LoraLoaderModelOnly)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+      }
+    }
 
     // Load CLIP (Hunyuan uses llava-style CLIP)
     // For now, try using a standard text encoder approach
@@ -2069,6 +2174,7 @@ class ComfyUIWorkflowBuilder {
     String? initImageBase64,
     String filenamePrefix = 'ERI_mochi_video',
     String outputFormat = 'video/webp',
+    List<LoraConfig>? loras,
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
@@ -2077,10 +2183,28 @@ class ComfyUIWorkflowBuilder {
     _modelNode = _addNode('CheckpointLoaderSimple', {
       'ckpt_name': model,
     });
+    _modelOutput = 0;
     _clipNode = _modelNode;
     _clipOutput = 1;
     _vaeNode = _modelNode;
     _vaeOutput = 2;
+
+    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
 
     // Encode prompts
     _positiveNode = _addNode('CLIPTextEncode', {
@@ -2240,6 +2364,7 @@ class ComfyUIWorkflowBuilder {
         switchRatio: switchRatio,
         filenamePrefix: filenamePrefix,
         outputFormat: outputFormat,
+        loras: loras,
       );
     }
 
@@ -2259,6 +2384,7 @@ class ComfyUIWorkflowBuilder {
         initImageBase64: initImageBase64,
         filenamePrefix: filenamePrefix,
         outputFormat: outputFormat,
+        loras: loras,
       );
     }
 
@@ -2278,6 +2404,7 @@ class ComfyUIWorkflowBuilder {
         initImageBase64: initImageBase64,
         filenamePrefix: filenamePrefix,
         outputFormat: outputFormat,
+        loras: loras,
       );
     }
 
@@ -2301,6 +2428,7 @@ class ComfyUIWorkflowBuilder {
           augmentationLevel: augmentationLevel,
           minCfg: minCfg,
           filenamePrefix: filenamePrefix,
+          loras: loras,
         );
       }
     }
@@ -2322,6 +2450,7 @@ class ComfyUIWorkflowBuilder {
       initImageBase64: initImageBase64,
       filenamePrefix: filenamePrefix,
       outputFormat: _convertOutputFormat(outputFormat),
+      loras: loras,
     );
   }
 

@@ -106,6 +106,13 @@ SERVICES = {
         optional=True,
         description="Web mode (use instead of flutter)",
     ),
+    "lora-metadata": Service(
+        name="lora-metadata",
+        port=7805,
+        start_cmd=[str(COMFYUI_DIR / "venv" / "bin" / "python3"), "lora_metadata_server.py", "7805"],
+        cwd=ERIUI_DIR,
+        description="LoRA metadata API for filtering",
+    ),
 }
 
 

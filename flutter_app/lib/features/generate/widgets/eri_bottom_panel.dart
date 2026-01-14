@@ -967,16 +967,19 @@ class _LorasGridTabState extends ConsumerState<_LorasGridTab> {
     final lorasAsync = ref.watch(filteredLoraListProvider);
     final selectedLoras = ref.watch(selectedLorasProvider);
     final loras = lorasAsync.valueOrNull ?? [];
+    final baseModelFilter = ref.watch(loraBaseModelFilterProvider);
+    final baseModelOptions = ref.watch(loraBaseModelOptionsProvider);
+    final params = ref.watch(generationParamsProvider);
 
     return Column(
       children: [
-        // Toolbar with filter and refresh
+        // Toolbar with filter, base model dropdown, and refresh
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(
             children: [
               SizedBox(
-                width: 200,
+                width: 160,
                 child: TextField(
                   controller: _filterController,
                   decoration: InputDecoration(
@@ -1001,6 +1004,53 @@ class _LorasGridTabState extends ConsumerState<_LorasGridTab> {
                 ),
               ),
               const SizedBox(width: 8),
+              // Base model filter dropdown
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  border: Border.all(color: colorScheme.outline.withOpacity(0.5)),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: baseModelFilter,
+                    isDense: true,
+                    style: TextStyle(fontSize: 12, color: colorScheme.onSurface),
+                    items: baseModelOptions.map((option) {
+                      final label = option == 'all' ? 'All Types' : option.toUpperCase();
+                      return DropdownMenuItem(
+                        value: option,
+                        child: Text(label),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        ref.read(loraBaseModelFilterProvider.notifier).state = value;
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // Auto-match button - sets filter to current model type
+              if (params.model != null) ...[
+                Tooltip(
+                  message: 'Filter to match selected model (${getBaseModelType(params.model!)})',
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.auto_fix_high,
+                      size: 18,
+                      color: baseModelFilter == getBaseModelType(params.model!)
+                          ? colorScheme.primary
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                    onPressed: () {
+                      final modelType = getBaseModelType(params.model!);
+                      ref.read(loraBaseModelFilterProvider.notifier).state = modelType;
+                    },
+                  ),
+                ),
+              ],
               IconButton(
                 icon: const Icon(Icons.refresh, size: 18),
                 tooltip: 'Refresh LoRAs',

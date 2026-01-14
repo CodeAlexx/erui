@@ -351,6 +351,7 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
           initImageBase64: params.initImage,
           denoise: params.initImage != null ? params.initImageCreativity : 1.0,
           filenamePrefix: 'ERI_flux',
+          loras: loraConfigs,
         );
       }
 
@@ -373,6 +374,7 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
           initImageBase64: params.initImage,
           denoise: params.initImage != null ? params.initImageCreativity : 1.0,
           filenamePrefix: 'ERI_sd35',
+          loras: loraConfigs,
         );
       }
 

@@ -241,6 +241,7 @@ class ModelsNotifier extends StateNotifier<ModelsState> {
         _comfyService.getCLIPModels(),     // 5: text encoders (CLIP models)
         _comfyService.getSamplers(),       // 6: samplers
         _comfyService.getSchedulers(),     // 7: schedulers
+        _comfyService.getDiffusionModels(),// 8: diffusion models (UNETs)
       ]);
 
       final checkpointNames = results[0] as List<String>;
@@ -251,16 +252,31 @@ class ModelsNotifier extends StateNotifier<ModelsState> {
       final clipNames = results[5] as List<String>;
       final samplerNames = results[6] as List<String>;
       final schedulerNames = results[7] as List<String>;
+      final diffusionModelNames = results[8] as List<String>;
 
-      // Separate video models from regular checkpoints
+      // Separate video models from regular checkpoints (for checkpoints/ folder)
       final sdCheckpoints = <ModelInfo>[];
-      final videoModels = <ModelInfo>[];
+      final videoModelsFromCheckpoints = <ModelInfo>[];
 
       for (final name in checkpointNames) {
         if (_isVideoModel(name)) {
-          videoModels.add(ModelInfo.fromName(name, 'diffusion_model'));
+          videoModelsFromCheckpoints.add(ModelInfo.fromName(name, 'diffusion_model'));
         } else {
           sdCheckpoints.add(ModelInfo.fromName(name, 'checkpoint'));
+        }
+      }
+
+      // Build diffusion models list from UNETLoader (diffusion_models/ folder)
+      // This includes Flux, SD3.5, video models, etc.
+      final diffusionModels = diffusionModelNames
+          .map((n) => ModelInfo.fromName(n, 'diffusion_model'))
+          .toList();
+
+      // Merge video models from checkpoints with diffusion_models (avoiding duplicates)
+      final diffusionModelSet = diffusionModels.map((m) => m.name).toSet();
+      for (final videoModel in videoModelsFromCheckpoints) {
+        if (!diffusionModelSet.contains(videoModel.name)) {
+          diffusionModels.add(videoModel);
         }
       }
 
@@ -271,7 +287,7 @@ class ModelsNotifier extends StateNotifier<ModelsState> {
         controlnets: controlnetNames.map((n) => ModelInfo.fromName(n, 'controlnet')).toList(),
         embeddings: embeddingNames.map((n) => ModelInfo.fromName(n, 'embedding')).toList(),
         textEncoders: clipNames.map((n) => ModelInfo.fromName(n, 'text_encoder')).toList(),
-        diffusionModels: videoModels,
+        diffusionModels: diffusionModels,
         samplers: samplerNames,
         schedulers: schedulerNames,
         isLoading: false,

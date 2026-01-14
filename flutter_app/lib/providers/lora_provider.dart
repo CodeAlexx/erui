@@ -1,12 +1,49 @@
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import '../services/comfyui_service.dart';
 
-/// LoRA/LyCORIS list provider - fetches from ComfyUI backend
+/// LoRA metadata server URL
+const _loraMetadataUrl = 'http://localhost:7805';
+
+/// LoRA/LyCORIS list provider - fetches from metadata server with base model info
 final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
-  final comfyService = ref.watch(comfyUIServiceProvider);
   final allModels = <LoraModel>[];
 
-  // Fetch LoRAs from ComfyUI backend
+  try {
+    // Try to fetch from metadata server first (has base model info)
+    final response = await http.get(Uri.parse('$_loraMetadataUrl/loras'))
+        .timeout(const Duration(seconds: 5));
+
+    if (response.statusCode == 200) {
+      final List<dynamic> loraData = json.decode(response.body);
+
+      for (final data in loraData) {
+        final name = data['name'] as String? ?? '';
+        final filename = data['filename'] as String? ?? name;
+        final baseModel = data['base_model'] as String? ?? 'unknown';
+        final type = data['type'] as String? ?? 'LoRA';
+
+        allModels.add(LoraModel(
+          name: name,
+          path: name,
+          title: _formatLoraTitle(filename),
+          previewImage: null,
+          type: type,
+          description: null,
+          baseModel: baseModel,
+        ));
+      }
+
+      return allModels;
+    }
+  } catch (e) {
+    // Metadata server not available, fall back to ComfyUI
+    print('LoRA metadata server not available: $e');
+  }
+
+  // Fallback: Fetch from ComfyUI backend (no base model info)
+  final comfyService = ref.watch(comfyUIServiceProvider);
   final loraNames = await comfyService.getLoras();
 
   for (final name in loraNames) {
@@ -21,10 +58,10 @@ final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
       name: name,
       path: name,
       title: _formatLoraTitle(name),
-      previewImage: null, // ComfyUI doesn't provide preview images for LoRAs
+      previewImage: null,
       type: type,
       description: null,
-      baseModel: null,
+      baseModel: null, // Unknown when using fallback
     ));
   }
 
@@ -53,17 +90,63 @@ String _formatLoraTitle(String name) {
 /// LoRA filter text provider
 final loraFilterProvider = StateProvider<String>((ref) => '');
 
-/// Filtered LoRA list based on search
+/// Base model filter provider - filters LoRAs by compatible base model
+/// Values: 'all', 'flux', 'sdxl', 'sd15', 'sd3', 'wan', 'ltx', 'hunyuan', etc.
+final loraBaseModelFilterProvider = StateProvider<String>((ref) => 'all');
+
+/// Available base model filter options
+final loraBaseModelOptionsProvider = Provider<List<String>>((ref) {
+  return ['all', 'flux', 'sdxl', 'sd15', 'sd3', 'wan', 'ltx', 'hunyuan', 'hidream', 'zimage', 'unknown'];
+});
+
+/// Get base model type from currently selected model name
+String getBaseModelType(String modelName) {
+  final lower = modelName.toLowerCase();
+
+  if (lower.contains('flux')) return 'flux';
+  if (lower.contains('sdxl') || lower.contains('xl')) return 'sdxl';
+  if (lower.contains('sd3') || lower.contains('sd_3') || lower.contains('stable-diffusion-3')) return 'sd3';
+  if (lower.contains('sd1') || lower.contains('sd_1') || lower.contains('v1-5') || lower.contains('1.5')) return 'sd15';
+  if (lower.contains('wan')) return 'wan';
+  if (lower.contains('ltx')) return 'ltx';
+  if (lower.contains('hunyuan')) return 'hunyuan';
+  if (lower.contains('hidream')) return 'hidream';
+  if (lower.contains('zimage') || lower.contains('z-image') || lower.contains('z_image')) return 'zimage';
+  if (lower.contains('kandinsky')) return 'kandinsky';
+
+  return 'unknown';
+}
+
+/// Filtered LoRA list based on search AND base model filter
 final filteredLoraListProvider = Provider<AsyncValue<List<LoraModel>>>((ref) {
   final filter = ref.watch(loraFilterProvider).toLowerCase();
+  final baseModelFilter = ref.watch(loraBaseModelFilterProvider);
   final lorasAsync = ref.watch(loraListProvider);
+
   return lorasAsync.whenData((loras) {
-    if (filter.isEmpty) return loras;
-    return loras.where((lora) {
-      return lora.name.toLowerCase().contains(filter) ||
-             lora.title.toLowerCase().contains(filter) ||
-             (lora.baseModel?.toLowerCase().contains(filter) ?? false);
-    }).toList();
+    var filtered = loras;
+
+    // Filter by base model if not 'all'
+    if (baseModelFilter != 'all') {
+      filtered = filtered.where((lora) {
+        // If LoRA base model is unknown, show it (might be compatible)
+        if (lora.baseModel == null || lora.baseModel == 'unknown') {
+          return true;
+        }
+        return lora.baseModel!.toLowerCase() == baseModelFilter.toLowerCase();
+      }).toList();
+    }
+
+    // Filter by search text
+    if (filter.isNotEmpty) {
+      filtered = filtered.where((lora) {
+        return lora.name.toLowerCase().contains(filter) ||
+               lora.title.toLowerCase().contains(filter) ||
+               (lora.baseModel?.toLowerCase().contains(filter) ?? false);
+      }).toList();
+    }
+
+    return filtered;
   });
 });
 
