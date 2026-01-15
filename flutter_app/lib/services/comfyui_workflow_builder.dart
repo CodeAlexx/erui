@@ -511,9 +511,8 @@ class ComfyUIWorkflowBuilder {
         'vae': _nodeRef(_vaeNode, _vaeOutput),
       });
     } else {
-      // Text-to-image mode - use standard empty latent for Flux 1
-      // Flux 1 works with standard SD latent space
-      _latentNode = _addNode('EmptySD3LatentImage', {
+      // Text-to-image mode - use Flux-specific latent (128 channels, /16 compression)
+      _latentNode = _addNode('EmptyFlux2LatentImage', {
         'width': width,
         'height': height,
         'batch_size': batchSize,
@@ -557,17 +556,25 @@ class ComfyUIWorkflowBuilder {
   /// - TripleCLIPLoader for clip_l + clip_g + t5xxl
   /// - CLIPTextEncodeSD3 for prompt encoding
   /// - EmptySD3LatentImage for 16-channel latent
+  /// Build an SD3.5 image generation workflow matching reference.
+  ///
+  /// SD3.5 requires:
+  /// - UNETLoader for diffusion model
+  /// - TripleCLIPLoader (clip_l, clip_g, t5xxl)
+  /// - ModelSamplingSD3 with shift=3 (applied BEFORE LoRAs)
+  /// - CLIPTextEncodeSD3 for prompts
+  /// - SD3.5 specific VAE
   Map<String, dynamic> buildSD35({
     required String model,
     required String prompt,
     String negativePrompt = '',
     int width = 1024,
     int height = 1024,
-    int steps = 28,
-    double cfg = 4.5,
+    int steps = 44,  // Reference uses 44 steps
+    double cfg = 5.5,  // Reference uses CFG 5.5
     int seed = -1,
-    String sampler = 'euler',
-    String scheduler = 'simple',
+    String sampler = 'dpmpp_2m',  // Reference uses dpmpp_2m
+    String scheduler = 'sgm_uniform',  // Reference uses sgm_uniform
     int batchSize = 1,
     String? vae,
     String clipL = 'clip_l.safetensors',
@@ -577,15 +584,22 @@ class ComfyUIWorkflowBuilder {
     double denoise = 1.0,
     String filenamePrefix = 'ERI_sd35',
     List<LoraConfig>? loras,
+    double shift = 3.0,  // ModelSamplingSD3 shift parameter
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
     // Load SD3.5 model using UNETLoader (diffusion_models path)
     final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
-    _modelNode = _addNode('UNETLoader', {
+    final unetNode = _addNode('UNETLoader', {
       'unet_name': model,
       'weight_dtype': weightDtype,
+    });
+
+    // Apply ModelSamplingSD3 with shift (BEFORE LoRAs per reference)
+    _modelNode = _addNode('ModelSamplingSD3', {
+      'model': _nodeRef(unetNode, 0),
+      'shift': shift,
     });
     _modelOutput = 0;
 
@@ -597,7 +611,7 @@ class ComfyUIWorkflowBuilder {
     });
     _clipOutput = 0;
 
-    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    // Apply LoRAs AFTER ModelSamplingSD3 (per reference workflow)
     if (loras != null && loras.isNotEmpty) {
       for (final lora in loras) {
         final loraNode = _addNode('LoraLoader', {
@@ -614,9 +628,9 @@ class ComfyUIWorkflowBuilder {
       }
     }
 
-    // Load VAE
+    // Load VAE - use SD3.5 specific VAE
     _vaeNode = _addNode('VAELoader', {
-      'vae_name': vae ?? 'ae.safetensors',
+      'vae_name': vae ?? 'OfficialStableDiffusion/sd35_vae.safetensors',
     });
     _vaeOutput = 0;
 
@@ -667,6 +681,423 @@ class ComfyUIWorkflowBuilder {
     }
 
     // Standard KSampler for SD3.5
+    _samplerNode = _addNode('KSampler', {
+      'seed': resolvedSeed,
+      'steps': steps,
+      'cfg': cfg,
+      'sampler_name': sampler,
+      'scheduler': scheduler,
+      'denoise': denoise,
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
+  /// Build a Chroma (Chroma1-HD) image generation workflow
+  ///
+  /// Chroma is a Flux-like model that supports negative prompts via CFG.
+  /// Key differences from Flux:
+  /// - Uses single T5 CLIP with type "chroma"
+  /// - Supports proper negative prompts with CFG
+  /// - Uses ModelSamplingAuraFlow with shift=1
+  Map<String, dynamic> buildChroma({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 26,
+    double cfg = 3.8,
+    int seed = -1,
+    String sampler = 'euler',
+    String scheduler = 'beta',
+    int batchSize = 1,
+    String? vae,
+    String clipT5 = 't5xxl_fp16.safetensors',
+    String? initImageBase64,
+    double denoise = 1.0,
+    String filenamePrefix = 'ERI_chroma',
+    List<LoraConfig>? loras,
+    double shift = 1.0,
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Load Chroma model using UNETLoader (diffusion_models path)
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': weightDtype,
+    });
+    _modelOutput = 0;
+
+    // Apply ModelSamplingAuraFlow for Chroma (flow shift)
+    final modelSamplingNode = _addNode('ModelSamplingAuraFlow', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'shift': shift,
+    });
+    _modelNode = modelSamplingNode;
+    _modelOutput = 0;
+
+    // Load single T5 CLIP for Chroma
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': clipT5,
+    });
+    _clipOutput = 0;
+
+    // Apply LoRAs (after model sampling, before encoding)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
+
+    // Load VAE (ae.safetensors for Chroma, same as Flux)
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae ?? 'ae.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using standard CLIPTextEncode (Chroma supports negatives!)
+    _positiveNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': prompt,
+    });
+
+    _negativeNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': negativePrompt,
+    });
+
+    // Create latent - img2img or empty
+    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
+      // Image-to-image mode
+      final loadImageNode = _addNode('LoadImageBase64', {
+        'image': initImageBase64,
+      });
+
+      final resizeNode = _addNode('ImageResize', {
+        'image': _nodeRef(loadImageNode, 0),
+        'width': width,
+        'height': height,
+        'interpolation': 'bicubic',
+        'method': 'fill / crop',
+        'condition': 'always',
+      });
+
+      _latentNode = _addNode('VAEEncode', {
+        'pixels': _nodeRef(resizeNode, 0),
+        'vae': _nodeRef(_vaeNode, _vaeOutput),
+      });
+    } else {
+      // Text-to-image mode - use SD3 latent for Chroma
+      _latentNode = _addNode('EmptySD3LatentImage', {
+        'width': width,
+        'height': height,
+        'batch_size': batchSize,
+      });
+    }
+
+    // Standard KSampler with CFG (Chroma uses real CFG unlike Flux)
+    _samplerNode = _addNode('KSampler', {
+      'seed': resolvedSeed,
+      'steps': steps,
+      'cfg': cfg,
+      'sampler_name': sampler,
+      'scheduler': scheduler,
+      'denoise': denoise,
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
+  /// Build a HiDream image generation workflow
+  ///
+  /// HiDream uses QuadrupleCLIPLoader (clip_l, clip_g, t5xxl, llama) and ModelSamplingSD3.
+  /// Variants: Full (shift=3, 50 steps), Dev (shift=6, 28 steps, cfg=1), Fast (shift=3, 16 steps)
+  Map<String, dynamic> buildHiDream({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 50,
+    double cfg = 5.0,
+    int seed = -1,
+    String sampler = 'uni_pc',
+    String scheduler = 'simple',
+    int batchSize = 1,
+    String? vae,
+    String clipL = 'clip_l_hidream.safetensors',
+    String clipG = 'clip_g_hidream.safetensors',
+    String clipT5 = 't5xxl_fp8_e4m3fn.safetensors',
+    String clipLlama = 'llama_3.1_8b_instruct_fp8_scaled.safetensors',
+    String? initImageBase64,
+    double denoise = 1.0,
+    String filenamePrefix = 'ERI_hidream',
+    List<LoraConfig>? loras,
+    double shift = 3.0,
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Load HiDream model using UNETLoader
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
+    final unetNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': weightDtype,
+    });
+
+    // Apply ModelSamplingSD3 with shift (BEFORE LoRAs per SD3-family convention)
+    _modelNode = _addNode('ModelSamplingSD3', {
+      'model': _nodeRef(unetNode, 0),
+      'shift': shift,
+    });
+    _modelOutput = 0;
+
+    // Load QuadrupleCLIP (clip_l + clip_g + t5xxl + llama) for HiDream
+    _clipNode = _addNode('QuadrupleCLIPLoader', {
+      'clip_name1': clipL,
+      'clip_name2': clipG,
+      'clip_name3': clipT5,
+      'clip_name4': clipLlama,
+    });
+    _clipOutput = 0;
+
+    // Apply LoRAs AFTER ModelSamplingSD3 (per SD3-family convention)
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
+
+    // Load VAE (ae.safetensors for HiDream)
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae ?? 'ae.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using standard CLIPTextEncode
+    _positiveNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': prompt,
+    });
+
+    _negativeNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': negativePrompt,
+    });
+
+    // Create latent - img2img or empty
+    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
+      final loadImageNode = _addNode('LoadImageBase64', {
+        'image': initImageBase64,
+      });
+
+      final resizeNode = _addNode('ImageResize', {
+        'image': _nodeRef(loadImageNode, 0),
+        'width': width,
+        'height': height,
+        'interpolation': 'bicubic',
+        'method': 'fill / crop',
+        'condition': 'always',
+      });
+
+      _latentNode = _addNode('VAEEncode', {
+        'pixels': _nodeRef(resizeNode, 0),
+        'vae': _nodeRef(_vaeNode, _vaeOutput),
+      });
+    } else {
+      _latentNode = _addNode('EmptySD3LatentImage', {
+        'width': width,
+        'height': height,
+        'batch_size': batchSize,
+      });
+    }
+
+    // Standard KSampler
+    _samplerNode = _addNode('KSampler', {
+      'seed': resolvedSeed,
+      'steps': steps,
+      'cfg': cfg,
+      'sampler_name': sampler,
+      'scheduler': scheduler,
+      'denoise': denoise,
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(_positiveNode, 0),
+      'negative': _nodeRef(_negativeNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
+  /// Build an OmniGen2 image generation workflow
+  ///
+  /// OmniGen2 uses Qwen VL encoder with type "omnigen2".
+  /// Can do text-to-image or image-conditioned generation.
+  Map<String, dynamic> buildOmniGen2({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 20,
+    double cfg = 5.0,
+    int seed = -1,
+    String sampler = 'euler',
+    String scheduler = 'simple',
+    int batchSize = 1,
+    String? vae,
+    String clipQwen = 'qwen_2.5_vl_fp16.safetensors',
+    String? initImageBase64,
+    double denoise = 1.0,
+    String filenamePrefix = 'ERI_omnigen2',
+    List<LoraConfig>? loras,
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Load OmniGen2 model using UNETLoader
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': weightDtype,
+    });
+    _modelOutput = 0;
+
+    // Load Qwen VL CLIP
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': clipQwen,
+    });
+    _clipOutput = 0;
+
+    // Apply LoRAs
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoader', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'clip': _nodeRef(_clipNode, _clipOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+          'strength_clip': lora.clipStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+        _clipNode = loraNode;
+        _clipOutput = 1;
+      }
+    }
+
+    // Load VAE (ae.safetensors for OmniGen2)
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae ?? 'ae.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Encode prompts using standard CLIPTextEncode
+    _positiveNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': prompt,
+    });
+
+    _negativeNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': negativePrompt,
+    });
+
+    // Create latent - img2img or empty
+    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
+      final loadImageNode = _addNode('LoadImageBase64', {
+        'image': initImageBase64,
+      });
+
+      final resizeNode = _addNode('ImageResize', {
+        'image': _nodeRef(loadImageNode, 0),
+        'width': width,
+        'height': height,
+        'interpolation': 'bicubic',
+        'method': 'fill / crop',
+        'condition': 'always',
+      });
+
+      _latentNode = _addNode('VAEEncode', {
+        'pixels': _nodeRef(resizeNode, 0),
+        'vae': _nodeRef(_vaeNode, _vaeOutput),
+      });
+    } else {
+      _latentNode = _addNode('EmptySD3LatentImage', {
+        'width': width,
+        'height': height,
+        'batch_size': batchSize,
+      });
+    }
+
+    // Standard KSampler with CFG
     _samplerNode = _addNode('KSampler', {
       'seed': resolvedSeed,
       'steps': steps,
@@ -1551,14 +1982,17 @@ class ComfyUIWorkflowBuilder {
   // VIDEO GENERATION WORKFLOWS
   // ============================================================================
 
-  /// Build an LTX-2 Video workflow matching official Lightricks workflow
+  /// Build an LTX-2 video workflow exactly matching the official Lightricks reference.
   ///
-  /// Two-stage sampling with latent upscale:
-  /// - Stage 1: Base sampling with LTXVScheduler (20 steps, cfg=4)
-  /// - Stage 2: Refinement after 2x upscale with ManualSigmas (4 steps, cfg=1)
-  /// - LoRAs applied for stage 2 refinement
-  /// - VAEDecodeTiled for low VRAM decoding
-  /// - CreateVideo + SaveVideo for mp4 output
+  /// LTX-2 Video Workflow - Simplified single-stage sampling
+  ///
+  /// Uses only verified ComfyUI nodes:
+  /// - CheckpointLoaderSimple, LTXAVTextEncoderLoader, LTXVAudioVAELoader
+  /// - CLIPTextEncode, LTXVConditioning
+  /// - EmptyLTXVLatentVideo, LTXVEmptyLatentAudio, LTXVConcatAVLatent
+  /// - LTXVScheduler, RandomNoise, KSamplerSelect, CFGGuider
+  /// - SamplerCustomAdvanced, LTXVSeparateAVLatent
+  /// - VAEDecodeTiled, LTXVAudioVAEDecode, VHS_VideoCombine
   Map<String, dynamic> buildLTXVideo({
     required String model,
     required String prompt,
@@ -1575,240 +2009,158 @@ class ComfyUIWorkflowBuilder {
     String filenamePrefix = 'ERI_ltx_video',
     String outputFormat = 'video/h264-mp4',
     List<LoraConfig>? loras,
+    // LTX-specific parameters
+    String textEncoder = 'gemma_3_12B_it.safetensors',
+    String distilledLora = 'ltx-2-19b-distilled-lora-384.safetensors',
+    String upscaleModel = 'ltx-2-spatial-upscaler-x2-1.0.safetensors',
   }) {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // === MODEL SECTION ===
-
-    // Load checkpoint (LTX-2 model)
+    // CheckpointLoaderSimple - load LTX model
     final checkpointNode = _addNode('CheckpointLoaderSimple', {
       'ckpt_name': model,
     });
-    _modelNode = checkpointNode;
-    _modelOutput = 0;
-    _vaeNode = checkpointNode;
-    _vaeOutput = 2;
 
-    // LTX AV Text Encoder Loader (uses gemma text encoder)
-    final textEncoderNode = _addNode('LTXAVTextEncoderLoader', {
-      'text_encoder': 'gemma_3_12B_it.safetensors',
+    // LTXAVTextEncoderLoader - load gemma text encoder
+    final clipNode = _addNode('LTXAVTextEncoderLoader', {
+      'text_encoder': textEncoder,
       'ckpt_name': model,
     });
-    _clipNode = textEncoderNode;
-    _clipOutput = 0;
 
-    // LTX Audio VAE Loader (from same checkpoint)
+    // LTXVAudioVAELoader - load audio VAE from same checkpoint
     final audioVaeNode = _addNode('LTXVAudioVAELoader', {
       'ckpt_name': model,
     });
 
-    // === PROMPT SECTION ===
-
-    // CLIP Text Encode (Positive)
-    _positiveNode = _addNode('CLIPTextEncode', {
+    // CLIPTextEncode - positive prompt
+    final positiveNode = _addNode('CLIPTextEncode', {
       'text': prompt,
-      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip': _nodeRef(clipNode, 0),
     });
 
-    // CLIP Text Encode (Negative)
-    _negativeNode = _addNode('CLIPTextEncode', {
+    // CLIPTextEncode - negative prompt
+    final negativeNode = _addNode('CLIPTextEncode', {
       'text': negativePrompt,
-      'clip': _nodeRef(_clipNode, _clipOutput),
+      'clip': _nodeRef(clipNode, 0),
     });
 
-    // LTXVConditioning - adds frame rate
+    // LTXVConditioning - add frame rate to conditioning
     final conditioningNode = _addNode('LTXVConditioning', {
-      'frame_rate': fps.toDouble(),
-      'positive': _nodeRef(_positiveNode, 0),
-      'negative': _nodeRef(_negativeNode, 0),
+      'frame_rate': fps,
+      'positive': _nodeRef(positiveNode, 0),
+      'negative': _nodeRef(negativeNode, 0),
     });
 
-    // === LATENT SETUP ===
-
-    // Calculate scaled dimensions for initial latent (will be upscaled 2x)
-    final scaledWidth = (width / 2).round();
-    final scaledHeight = (height / 2).round();
-
-    // EmptyLTXVLatentVideo
-    final emptyVideoLatentNode = _addNode('EmptyLTXVLatentVideo', {
-      'width': scaledWidth,
-      'height': scaledHeight,
+    // EmptyLTXVLatentVideo - video latent
+    final videoLatentNode = _addNode('EmptyLTXVLatentVideo', {
+      'width': width,
+      'height': height,
       'length': frames,
       'batch_size': 1,
     });
 
-    // LTXVEmptyLatentAudio
-    final emptyAudioLatentNode = _addNode('LTXVEmptyLatentAudio', {
-      'audio_vae': _nodeRef(audioVaeNode, 0),
+    // LTXVEmptyLatentAudio - audio latent
+    final audioLatentNode = _addNode('LTXVEmptyLatentAudio', {
       'frames_number': frames,
       'frame_rate': fps,
       'batch_size': 1,
+      'audio_vae': _nodeRef(audioVaeNode, 0),
     });
 
     // LTXVConcatAVLatent - combine video + audio latents
-    final combinedLatentNode = _addNode('LTXVConcatAVLatent', {
-      'video_latent': _nodeRef(emptyVideoLatentNode, 0),
-      'audio_latent': _nodeRef(emptyAudioLatentNode, 0),
-    });
-    _latentNode = combinedLatentNode;
-
-    // === STAGE 1 SAMPLING (Base) ===
-
-    // RandomNoise for stage 1
-    final noise1Node = _addNode('RandomNoise', {
-      'noise_seed': resolvedSeed,
+    final concatLatentNode = _addNode('LTXVConcatAVLatent', {
+      'video_latent': _nodeRef(videoLatentNode, 0),
+      'audio_latent': _nodeRef(audioLatentNode, 0),
     });
 
-    // KSamplerSelect for stage 1
-    final sampler1SelectNode = _addNode('KSamplerSelect', {
-      'sampler_name': 'euler_ancestral',
-    });
+    // Apply LoRAs if provided
+    var currentModel = checkpointNode;
+    var currentModelOutput = 0;
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(currentModel, currentModelOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        currentModel = loraNode;
+        currentModelOutput = 0;
+      }
+    }
 
-    // LTXVScheduler for stage 1
-    final scheduler1Node = _addNode('LTXVScheduler', {
+    // LTXVScheduler - scheduler for sigmas
+    final schedulerNode = _addNode('LTXVScheduler', {
       'steps': steps,
       'max_shift': 2.05,
       'base_shift': 0.95,
       'stretch': true,
       'terminal': 0.1,
-      'latent': _nodeRef(_latentNode, 0),
+      'latent': _nodeRef(concatLatentNode, 0),
     });
 
-    // CFGGuider for stage 1 (cfg=4)
-    final guider1Node = _addNode('CFGGuider', {
-      'cfg': cfg,
-      'model': _nodeRef(_modelNode, _modelOutput),
-      'positive': _nodeRef(conditioningNode, 0),
-      'negative': _nodeRef(conditioningNode, 1),
+    // RandomNoise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
     });
 
-    // SamplerCustomAdvanced - Stage 1
-    final sampler1Node = _addNode('SamplerCustomAdvanced', {
-      'noise': _nodeRef(noise1Node, 0),
-      'guider': _nodeRef(guider1Node, 0),
-      'sampler': _nodeRef(sampler1SelectNode, 0),
-      'sigmas': _nodeRef(scheduler1Node, 0),
-      'latent_image': _nodeRef(_latentNode, 0),
-    });
-
-    // === STAGE 1 POST-PROCESSING ===
-
-    // LTXVSeparateAVLatent - separate video/audio after stage 1
-    final separate1Node = _addNode('LTXVSeparateAVLatent', {
-      'av_latent': _nodeRef(sampler1Node, 0),
-    });
-
-    // LTXVCropGuides
-    final cropGuidesNode = _addNode('LTXVCropGuides', {
-      'positive': _nodeRef(conditioningNode, 0),
-      'negative': _nodeRef(conditioningNode, 1),
-      'latent': _nodeRef(separate1Node, 0),
-    });
-
-    // LatentUpscaleModelLoader
-    final upscaleModelNode = _addNode('LatentUpscaleModelLoader', {
-      'model_name': 'ltx-2-spatial-upscaler-x2-1.0.safetensors',
-    });
-
-    // LTXVLatentUpsampler - 2x spatial upscale
-    final upscaledLatentNode = _addNode('LTXVLatentUpsampler', {
-      'samples': _nodeRef(cropGuidesNode, 2),
-      'upscale_model': _nodeRef(upscaleModelNode, 0),
-      'vae': _nodeRef(_vaeNode, _vaeOutput),
-    });
-
-    // LTXVConcatAVLatent - recombine with audio
-    final recombinedLatentNode = _addNode('LTXVConcatAVLatent', {
-      'video_latent': _nodeRef(upscaledLatentNode, 0),
-      'audio_latent': _nodeRef(separate1Node, 1),
-    });
-
-    // === STAGE 2 SAMPLING (Refinement with LoRAs) ===
-
-    // Apply LoRAs for stage 2 (model only, not clip)
-    var stage2Model = _modelNode;
-    var stage2ModelOutput = _modelOutput;
-    if (loras != null && loras.isNotEmpty) {
-      for (final lora in loras) {
-        final loraNode = _addNode('LoraLoaderModelOnly', {
-          'lora_name': lora.name,
-          'strength_model': lora.modelStrength,
-          'model': _nodeRef(stage2Model, stage2ModelOutput),
-        });
-        stage2Model = loraNode;
-        stage2ModelOutput = 0;
-      }
-    }
-
-    // RandomNoise for stage 2 (fixed seed 0)
-    final noise2Node = _addNode('RandomNoise', {
-      'noise_seed': 0,
-    });
-
-    // KSamplerSelect for stage 2
-    final sampler2SelectNode = _addNode('KSamplerSelect', {
+    // KSamplerSelect - euler_ancestral sampler (as per reference)
+    final samplerNode = _addNode('KSamplerSelect', {
       'sampler_name': 'euler_ancestral',
     });
 
-    // ManualSigmas for stage 2 (4 refinement steps)
-    final manualSigmasNode = _addNode('ManualSigmas', {
-      'sigmas_string': '0.909375, 0.725, 0.421875, 0.0',
+    // CFGGuider - standard classifier-free guidance
+    final guiderNode = _addNode('CFGGuider', {
+      'cfg': cfg,
+      'model': _nodeRef(currentModel, currentModelOutput),
+      'positive': _nodeRef(conditioningNode, 0),
+      'negative': _nodeRef(conditioningNode, 1),
     });
 
-    // CFGGuider for stage 2 (cfg=1 for refinement)
-    final guider2Node = _addNode('CFGGuider', {
-      'cfg': 1.0,
-      'model': _nodeRef(stage2Model, stage2ModelOutput),
-      'positive': _nodeRef(cropGuidesNode, 0),
-      'negative': _nodeRef(cropGuidesNode, 1),
+    // SamplerCustomAdvanced - sampling
+    final samplerAdvNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
+      'latent_image': _nodeRef(concatLatentNode, 0),
     });
 
-    // SamplerCustomAdvanced - Stage 2
-    _samplerNode = _addNode('SamplerCustomAdvanced', {
-      'noise': _nodeRef(noise2Node, 0),
-      'guider': _nodeRef(guider2Node, 0),
-      'sampler': _nodeRef(sampler2SelectNode, 0),
-      'sigmas': _nodeRef(manualSigmasNode, 0),
-      'latent_image': _nodeRef(recombinedLatentNode, 0),
+    // LTXVSeparateAVLatent - separate video and audio
+    final separateNode = _addNode('LTXVSeparateAVLatent', {
+      'av_latent': _nodeRef(samplerAdvNode, 0),
     });
 
-    // === DECODE & OUTPUT ===
-
-    // LTXVSeparateAVLatent - final separate
-    final finalSeparateNode = _addNode('LTXVSeparateAVLatent', {
-      'av_latent': _nodeRef(_samplerNode, 1), // denoised_output
-    });
-
-    // VAEDecodeTiled for video (low VRAM)
-    _imageNode = _addNode('VAEDecodeTiled', {
-      'samples': _nodeRef(finalSeparateNode, 0),
-      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    // VAEDecodeTiled - decode video with tiling for large videos
+    final imageNode = _addNode('VAEDecodeTiled', {
       'tile_size': 512,
       'overlap': 64,
       'temporal_size': 4096,
       'temporal_overlap': 8,
+      'samples': _nodeRef(separateNode, 0),
+      'vae': _nodeRef(checkpointNode, 2),
     });
 
-    // LTXVAudioVAEDecode for audio
-    final audioDecodeNode = _addNode('LTXVAudioVAEDecode', {
-      'samples': _nodeRef(finalSeparateNode, 1),
+    // LTXVAudioVAEDecode - decode audio
+    final audioNode = _addNode('LTXVAudioVAEDecode', {
+      'samples': _nodeRef(separateNode, 1),
       'audio_vae': _nodeRef(audioVaeNode, 0),
     });
 
-    // CreateVideo - combine images + audio
-    final createVideoNode = _addNode('CreateVideo', {
-      'images': _nodeRef(_imageNode, 0),
-      'audio': _nodeRef(audioDecodeNode, 0),
-      'fps': fps.toDouble(),
-    });
-
-    // SaveVideo - output as mp4
-    _addNode('SaveVideo', {
-      'video': _nodeRef(createVideoNode, 0),
+    // VHS_VideoCombine - output video with audio
+    _addNode('VHS_VideoCombine', {
+      'images': _nodeRef(imageNode, 0),
+      'audio': _nodeRef(audioNode, 0),
+      'frame_rate': fps,
+      'loop_count': 0,
       'filename_prefix': filenamePrefix,
-      'format': 'mp4',
-      'codec': 'auto',
+      'format': outputFormat,
+      'pix_fmt': 'yuv420p',
+      'crf': 19,
+      'save_metadata': true,
+      'trim_to_audio': false,
+      'pingpong': false,
+      'save_output': true,
     });
 
     return Map<String, dynamic>.from(_workflow);
@@ -1893,7 +2245,6 @@ class ComfyUIWorkflowBuilder {
     // Load CLIP text encoder (T5)
     _clipNode = _addNode('CLIPLoader', {
       'clip_name': clipModel,
-      'type': 'wan',
     });
     _clipOutput = 0;
 
@@ -2052,11 +2403,12 @@ class ComfyUIWorkflowBuilder {
       }
     }
 
-    // Load CLIP (Hunyuan uses llava-style CLIP)
-    // For now, try using a standard text encoder approach
-    _clipNode = _addNode('CLIPLoader', {
-      'clip_name': 't5xxl_fp16.safetensors',
-      'type': 'sd3',  // Hunyuan uses similar text encoding
+    // Load CLIP using DualCLIPLoader for Hunyuan Video
+    // Hunyuan Video uses llava + clip_l text encoders
+    _clipNode = _addNode('DualCLIPLoader', {
+      'clip_name1': 'llava_llama3_fp8_scaled.safetensors',
+      'clip_name2': 'clip_l.safetensors',
+      'type': 'hunyuan_video',
     });
     _clipOutput = 0;
 
@@ -2179,30 +2531,36 @@ class ComfyUIWorkflowBuilder {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // Load Mochi model
-    _modelNode = _addNode('CheckpointLoaderSimple', {
-      'ckpt_name': model,
+    // Load Mochi model using UNETLoader (diffusion_models path)
+    final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': weightDtype,
     });
     _modelOutput = 0;
-    _clipNode = _modelNode;
-    _clipOutput = 1;
-    _vaeNode = _modelNode;
-    _vaeOutput = 2;
 
-    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    // Load CLIP using CLIPLoader
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': 't5xxl_fp16.safetensors',
+    });
+    _clipOutput = 0;
+
+    // Load VAE (use Mochi VAE if available, or standard video VAE)
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': 'mochi_preview_vae_bf16.safetensors',
+    });
+    _vaeOutput = 0;
+
+    // Apply LoRAs (model only, not clip)
     if (loras != null && loras.isNotEmpty) {
       for (final lora in loras) {
-        final loraNode = _addNode('LoraLoader', {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
           'model': _nodeRef(_modelNode, _modelOutput),
-          'clip': _nodeRef(_clipNode, _clipOutput),
           'lora_name': lora.name,
           'strength_model': lora.modelStrength,
-          'strength_clip': lora.clipStrength,
         });
         _modelNode = loraNode;
         _modelOutput = 0;
-        _clipNode = loraNode;
-        _clipOutput = 1;
       }
     }
 
@@ -2217,39 +2575,13 @@ class ComfyUIWorkflowBuilder {
       'clip': _nodeRef(_clipNode, _clipOutput),
     });
 
-    // Create latent based on mode
-    if (initImageBase64 != null && initImageBase64.isNotEmpty) {
-      // Image-to-video mode
-      final loadImageNode = _addNode('LoadImageBase64', {
-        'image': initImageBase64,
-      });
-
-      final resizeNode = _addNode('ImageResize', {
-        'image': _nodeRef(loadImageNode, 0),
-        'width': width,
-        'height': height,
-        'interpolation': 'bicubic',
-        'method': 'fill / crop',
-        'condition': 'always',
-      });
-
-      final encodedLatent = _addNode('VAEEncode', {
-        'pixels': _nodeRef(resizeNode, 0),
-        'vae': _nodeRef(_vaeNode, _vaeOutput),
-      });
-
-      _latentNode = _addNode('RepeatLatentBatch', {
-        'samples': _nodeRef(encodedLatent, 0),
-        'amount': frames,
-      });
-    } else {
-      // Text-to-video mode
-      _latentNode = _addNode('EmptyLatentImage', {
-        'width': width,
-        'height': height,
-        'batch_size': frames,
-      });
-    }
+    // Create video latent using EmptyMochiLatentVideo (proper 5D latent)
+    _latentNode = _addNode('EmptyMochiLatentVideo', {
+      'width': width,
+      'height': height,
+      'length': frames,
+      'batch_size': 1,
+    });
 
     // KSampler with Mochi-optimized settings
     _samplerNode = _addNode('KSampler', {

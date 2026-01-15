@@ -24,10 +24,12 @@ CACHE_FILE = '/home/alex/eriui/comfyui/ComfyUI/user/lora_metadata_cache.json'
 # Base model type mapping
 BASE_MODEL_PATTERNS = {
     'flux': ['flux', 'Flux'],
+    'chroma': ['chroma', 'Chroma'],
     'sdxl': ['sdxl', 'SDXL', 'stable-diffusion-xl'],
     'sd15': ['sd_1.5', 'sd1.5', 'sd15', 'stable-diffusion-v1'],
     'sd3': ['sd3', 'SD3', 'stable-diffusion-3'],
     'hidream': ['hidream', 'HiDream'],
+    'omnigen2': ['omnigen', 'OmniGen'],
     'zimage': ['zimage', 'z-image', 'Z-Image'],
     'ltx': ['ltx', 'LTX'],
     'wan': ['wan', 'Wan'],

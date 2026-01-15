@@ -18,11 +18,16 @@ final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
     if (response.statusCode == 200) {
       final List<dynamic> loraData = json.decode(response.body);
 
+      // Debug: count by base model
+      final Map<String, int> counts = {};
+
       for (final data in loraData) {
         final name = data['name'] as String? ?? '';
         final filename = data['filename'] as String? ?? name;
         final baseModel = data['base_model'] as String? ?? 'unknown';
         final type = data['type'] as String? ?? 'LoRA';
+
+        counts[baseModel] = (counts[baseModel] ?? 0) + 1;
 
         allModels.add(LoraModel(
           name: name,
@@ -34,6 +39,8 @@ final loraListProvider = FutureProvider<List<LoraModel>>((ref) async {
           baseModel: baseModel,
         ));
       }
+
+      print('LoRA metadata loaded: ${allModels.length} total, by type: $counts');
 
       return allModels;
     }
@@ -96,7 +103,7 @@ final loraBaseModelFilterProvider = StateProvider<String>((ref) => 'all');
 
 /// Available base model filter options
 final loraBaseModelOptionsProvider = Provider<List<String>>((ref) {
-  return ['all', 'flux', 'sdxl', 'sd15', 'sd3', 'wan', 'ltx', 'hunyuan', 'hidream', 'zimage', 'unknown'];
+  return ['all', 'flux', 'chroma', 'sdxl', 'sd15', 'sd3', 'wan', 'ltx', 'hunyuan', 'hidream', 'omnigen2', 'zimage', 'unknown'];
 });
 
 /// Get base model type from currently selected model name
@@ -104,6 +111,7 @@ String getBaseModelType(String modelName) {
   final lower = modelName.toLowerCase();
 
   if (lower.contains('flux')) return 'flux';
+  if (lower.contains('chroma')) return 'chroma';
   if (lower.contains('sdxl') || lower.contains('xl')) return 'sdxl';
   if (lower.contains('sd3') || lower.contains('sd_3') || lower.contains('stable-diffusion-3')) return 'sd3';
   if (lower.contains('sd1') || lower.contains('sd_1') || lower.contains('v1-5') || lower.contains('1.5')) return 'sd15';
@@ -111,6 +119,7 @@ String getBaseModelType(String modelName) {
   if (lower.contains('ltx')) return 'ltx';
   if (lower.contains('hunyuan')) return 'hunyuan';
   if (lower.contains('hidream')) return 'hidream';
+  if (lower.contains('omnigen')) return 'omnigen2';
   if (lower.contains('zimage') || lower.contains('z-image') || lower.contains('z_image')) return 'zimage';
   if (lower.contains('kandinsky')) return 'kandinsky';
 
@@ -128,6 +137,7 @@ final filteredLoraListProvider = Provider<AsyncValue<List<LoraModel>>>((ref) {
 
     // Filter by base model if not 'all'
     if (baseModelFilter != 'all') {
+      final beforeCount = filtered.length;
       filtered = filtered.where((lora) {
         // If LoRA base model is unknown, show it (might be compatible)
         if (lora.baseModel == null || lora.baseModel == 'unknown') {
@@ -135,6 +145,7 @@ final filteredLoraListProvider = Provider<AsyncValue<List<LoraModel>>>((ref) {
         }
         return lora.baseModel!.toLowerCase() == baseModelFilter.toLowerCase();
       }).toList();
+      print('LoRA filter: baseModel=$baseModelFilter, before=$beforeCount, after=${filtered.length}');
     }
 
     // Filter by search text

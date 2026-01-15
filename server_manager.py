@@ -358,11 +358,11 @@ def start_all(web_mode: bool = False):
     ensure_dirs()
 
     if web_mode:
-        # Web mode: cors + comfyui + onetrainer + eri-server + flutter-web
-        order = ["cors", "comfyui", "onetrainer", "eri-server", "flutter-web"]
+        # Web mode: cors + comfyui + lora-metadata + onetrainer + eri-server + flutter-web
+        order = ["cors", "comfyui", "lora-metadata", "onetrainer", "eri-server", "flutter-web"]
     else:
-        # Desktop mode: comfyui + onetrainer + flutter (no CORS or eri-server needed)
-        order = ["comfyui", "onetrainer", "flutter"]
+        # Desktop mode: comfyui + lora-metadata + onetrainer + flutter (no CORS or eri-server needed)
+        order = ["comfyui", "lora-metadata", "onetrainer", "flutter"]
 
     for name in order:
         if name in SERVICES:
@@ -377,7 +377,7 @@ def stop_all():
     print(colored("\nStopping all services...\n", Colors.BOLD))
 
     # Stop in reverse order (includes both flutter variants and eri-server)
-    order = ["flutter", "flutter-web", "eri-server", "onetrainer", "comfyui", "cors"]
+    order = ["flutter", "flutter-web", "eri-server", "onetrainer", "lora-metadata", "comfyui", "cors"]
 
     for name in order:
         if name in SERVICES:

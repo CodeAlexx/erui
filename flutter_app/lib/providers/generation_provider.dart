@@ -267,6 +267,28 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
 
     // Choose workflow type based on parameters
     if (params.videoMode) {
+      // Convert simple format name to VHS format string
+      String vhsFormat;
+      switch (params.videoFormat) {
+        case 'mp4':
+          vhsFormat = 'video/h264-mp4';
+          break;
+        case 'webp':
+          vhsFormat = 'image/webp';
+          break;
+        case 'gif':
+          vhsFormat = 'image/gif';
+          break;
+        case 'webm':
+          vhsFormat = 'video/webm';
+          break;
+        default:
+          // If already in VHS format, use as-is
+          vhsFormat = params.videoFormat.contains('/')
+              ? params.videoFormat
+              : 'video/h264-mp4';
+      }
+
       // Video generation workflow - auto-detect model type
       return builder.buildVideoAuto(
         model: modelToUse,
@@ -283,7 +305,7 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
         highNoiseModel: params.highNoiseModel,
         lowNoiseModel: params.lowNoiseModel,
         videoAugmentationLevel: params.videoAugmentationLevel,
-        outputFormat: params.videoFormat,
+        outputFormat: vhsFormat,
         loras: loraConfigs,
       );
     } else if (params.refinerModel != null &&
@@ -351,6 +373,95 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
           initImageBase64: params.initImage,
           denoise: params.initImage != null ? params.initImageCreativity : 1.0,
           filenamePrefix: 'ERI_flux',
+          loras: loraConfigs,
+        );
+      }
+
+      // Chroma models - Flux-like but with CFG and negative prompts
+      if (modelLower.contains('chroma')) {
+        return builder.buildChroma(
+          model: modelToUse,
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt,
+          width: params.width,
+          height: params.height,
+          steps: params.steps,
+          cfg: params.cfgScale,
+          seed: params.seed,
+          sampler: params.sampler,
+          scheduler: params.scheduler,
+          batchSize: params.batchSize,
+          vae: params.vae,
+          initImageBase64: params.initImage,
+          denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+          filenamePrefix: 'ERI_chroma',
+          loras: loraConfigs,
+        );
+      }
+
+      // HiDream models - uses QuadrupleCLIPLoader with llama
+      if (modelLower.contains('hidream')) {
+        // Auto-detect HiDream variant for optimal settings
+        double shift = 3.0;
+        int steps = params.steps;
+        double cfg = params.cfgScale;
+        String sampler = params.sampler;
+
+        if (modelLower.contains('dev')) {
+          shift = 6.0;
+          if (steps == 20) steps = 28;  // Default for dev
+          cfg = 1.0;  // Dev uses CFG=1
+          sampler = 'lcm';
+        } else if (modelLower.contains('fast')) {
+          shift = 3.0;
+          if (steps == 20) steps = 16;  // Default for fast
+          cfg = 1.0;
+          sampler = 'lcm';
+        } else {
+          // Full variant
+          if (steps == 20) steps = 50;  // Default for full
+          sampler = 'uni_pc';
+        }
+
+        return builder.buildHiDream(
+          model: modelToUse,
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt,
+          width: params.width,
+          height: params.height,
+          steps: steps,
+          cfg: cfg,
+          seed: params.seed,
+          sampler: sampler,
+          scheduler: params.scheduler,
+          batchSize: params.batchSize,
+          vae: params.vae,
+          initImageBase64: params.initImage,
+          denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+          filenamePrefix: 'ERI_hidream',
+          loras: loraConfigs,
+          shift: shift,
+        );
+      }
+
+      // OmniGen2 models - uses Qwen VL encoder
+      if (modelLower.contains('omnigen')) {
+        return builder.buildOmniGen2(
+          model: modelToUse,
+          prompt: params.prompt,
+          negativePrompt: params.negativePrompt,
+          width: params.width,
+          height: params.height,
+          steps: params.steps,
+          cfg: params.cfgScale,
+          seed: params.seed,
+          sampler: params.sampler,
+          scheduler: params.scheduler,
+          batchSize: params.batchSize,
+          vae: params.vae,
+          initImageBase64: params.initImage,
+          denoise: params.initImage != null ? params.initImageCreativity : 1.0,
+          filenamePrefix: 'ERI_omnigen2',
           loras: loraConfigs,
         );
       }

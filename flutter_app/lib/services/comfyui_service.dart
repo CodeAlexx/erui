@@ -480,8 +480,21 @@ class ComfyUIService {
         ),
       );
 
+      final data = response.data as Map<String, dynamic>;
+
+      // Check for error response
+      if (data.containsKey('error')) {
+        final error = data['error'] as Map<String, dynamic>?;
+        final nodeErrors = data['node_errors'] as Map<String, dynamic>?;
+        print('ComfyUI queue error: ${error?['message']}');
+        print('Error details: ${error?['details']}');
+        if (nodeErrors != null && nodeErrors.isNotEmpty) {
+          print('Node errors: $nodeErrors');
+        }
+        return null;
+      }
+
       if (response.statusCode == 200) {
-        final data = response.data as Map<String, dynamic>;
         final promptId = data['prompt_id'] as String?;
 
         // Initialize tracking for this execution
