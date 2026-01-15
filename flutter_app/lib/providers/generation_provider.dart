@@ -355,7 +355,7 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
       // Detect model type for specialized workflows
       final modelLower = modelToUse.toLowerCase();
 
-      // Flux models - need UNETLoader + DualCLIP + CLIPTextEncodeFlux
+      // Flux models - need UNETLoader + DualCLIP + FluxGuidance + ModelSamplingFlux
       if (modelLower.contains('flux')) {
         return builder.buildFlux(
           model: modelToUse,
@@ -364,7 +364,7 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
           width: params.width,
           height: params.height,
           steps: params.steps,
-          guidance: params.cfgScale,  // Flux uses guidance, not CFG
+          guidance: 3.5,  // Flux guidance is fixed at 3.5 via FluxGuidance node
           seed: params.seed,
           sampler: params.sampler,
           scheduler: params.scheduler,

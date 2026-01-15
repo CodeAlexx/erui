@@ -140,6 +140,7 @@ class ImagePreview extends StatelessWidget {
 class GenerationPreview extends StatefulWidget {
   final String? imageUrl;
   final bool isGenerating;
+  final bool isVideoMode;
   final double progress;
   final int currentStep;
   final int totalSteps;
@@ -149,6 +150,7 @@ class GenerationPreview extends StatefulWidget {
     super.key,
     this.imageUrl,
     this.isGenerating = false,
+    this.isVideoMode = false,
     this.progress = 0.0,
     this.currentStep = 0,
     this.totalSteps = 0,
@@ -295,7 +297,7 @@ class _GenerationPreviewState extends State<GenerationPreview> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        isVideo ? 'Generating video...' : 'Generating...',
+                        widget.isVideoMode ? 'Generating video...' : 'Generating image...',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 4),

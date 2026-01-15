@@ -89,7 +89,7 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
   @override
   Widget build(BuildContext context) {
     final generationState = ref.watch(generationProvider);
-    ref.watch(generationParamsProvider);
+    final generationParams = ref.watch(generationParamsProvider);
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _checkGenerationComplete());
 
@@ -181,6 +181,7 @@ class _GenerateScreenState extends ConsumerState<GenerateScreen> {
                                     ? generationState.generatedImages.first
                                     : null),
                             isGenerating: generationState.isGenerating,
+                            isVideoMode: generationParams.videoMode,
                             progress: generationState.progress,
                             currentStep: generationState.currentStep,
                             totalSteps: generationState.totalSteps,

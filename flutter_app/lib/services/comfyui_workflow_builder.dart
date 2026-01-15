@@ -405,27 +405,24 @@ class ComfyUIWorkflowBuilder {
 
   /// Build a Flux image generation workflow
   ///
-  /// Flux models require:
-  /// - UNETLoader for diffusion_models path
-  /// - DualCLIPLoader for clip_l + t5xxl
-  /// - CLIPTextEncodeFlux for prompt encoding with guidance
-  /// - EmptyFlux2LatentImage for 128-channel latent at /16 compression
-  /// - Flux2Scheduler for optimal timestep scheduling
+  /// Based on reference workflow: flux-lora-simple
+  /// Uses: UNETLoader, DualCLIPLoader, CLIPTextEncode, FluxGuidance,
+  /// ModelSamplingFlux, BasicGuider, BasicScheduler, SamplerCustomAdvanced
   Map<String, dynamic> buildFlux({
     required String model,
     required String prompt,
     String negativePrompt = '',
     int width = 1024,
     int height = 1024,
-    int steps = 20,
+    int steps = 35,
     double guidance = 3.5,
     int seed = -1,
-    String sampler = 'euler',
-    String scheduler = 'simple',
+    String sampler = 'dpmpp_2m',
+    String scheduler = 'sgm_uniform',
     int batchSize = 1,
     String? vae,
     String clipL = 'clip_l.safetensors',
-    String clipT5 = 't5xxl_fp16.safetensors',
+    String clipT5 = 't5xxl_fp8_e4m3fn_scaled.safetensors',
     String? initImageBase64,
     double denoise = 1.0,
     String filenamePrefix = 'ERI_flux',
@@ -434,8 +431,7 @@ class ComfyUIWorkflowBuilder {
     reset();
     final resolvedSeed = _resolveSeed(seed);
 
-    // Load Flux model using UNETLoader (diffusion_models path)
-    // Detect fp8 models and use appropriate weight dtype
+    // Load Flux model using UNETLoader
     final weightDtype = model.toLowerCase().contains('fp8') ? 'fp8_e4m3fn' : 'default';
     _modelNode = _addNode('UNETLoader', {
       'unet_name': model,
@@ -443,30 +439,37 @@ class ComfyUIWorkflowBuilder {
     });
     _modelOutput = 0;
 
-    // Load dual CLIP (clip_l + t5xxl) for Flux
+    // Load dual CLIP (t5xxl + clip_l) for Flux
     _clipNode = _addNode('DualCLIPLoader', {
-      'clip_name1': clipL,
-      'clip_name2': clipT5,
+      'clip_name1': clipT5,
+      'clip_name2': clipL,
       'type': 'flux',
     });
     _clipOutput = 0;
 
-    // Apply LoRAs (including LyCORIS - handled by standard LoraLoader)
+    // Apply LoRAs (model only for Flux)
     if (loras != null && loras.isNotEmpty) {
       for (final lora in loras) {
-        final loraNode = _addNode('LoraLoader', {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
           'model': _nodeRef(_modelNode, _modelOutput),
-          'clip': _nodeRef(_clipNode, _clipOutput),
           'lora_name': lora.name,
           'strength_model': lora.modelStrength,
-          'strength_clip': lora.clipStrength,
         });
         _modelNode = loraNode;
         _modelOutput = 0;
-        _clipNode = loraNode;
-        _clipOutput = 1;
       }
     }
+
+    // ModelSamplingFlux - applies flux-specific sampling with shift parameters
+    final modelSamplingNode = _addNode('ModelSamplingFlux', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'max_shift': 1.15,
+      'base_shift': 0.5,
+      'width': width,
+      'height': height,
+    });
+    _modelNode = modelSamplingNode;
+    _modelOutput = 0;
 
     // Load VAE (ae.safetensors for Flux)
     _vaeNode = _addNode('VAELoader', {
@@ -474,29 +477,23 @@ class ComfyUIWorkflowBuilder {
     });
     _vaeOutput = 0;
 
-    // Encode prompts using CLIPTextEncodeFlux with guidance
-    // Note: For Flux, we pass the same prompt to both clip_l and t5xxl inputs
-    _positiveNode = _addNode('CLIPTextEncodeFlux', {
+    // CLIPTextEncode - standard text encoding
+    final clipEncodeNode = _addNode('CLIPTextEncode', {
       'clip': _nodeRef(_clipNode, _clipOutput),
-      'clip_l': prompt,
-      't5xxl': prompt,
+      'text': prompt,
+    });
+
+    // FluxGuidance - applies guidance to conditioning
+    final guidanceNode = _addNode('FluxGuidance', {
+      'conditioning': _nodeRef(clipEncodeNode, 0),
       'guidance': guidance,
     });
 
-    // For Flux, negative prompt is typically empty - use standard CLIPTextEncode
-    // Flux doesn't use negative prompts in the traditional sense
-    _negativeNode = _addNode('CLIPTextEncode', {
-      'clip': _nodeRef(_clipNode, _clipOutput),
-      'text': '',
-    });
-
-    // Create latent - img2img or empty
+    // Create latent
     if (initImageBase64 != null && initImageBase64.isNotEmpty) {
-      // Image-to-image mode
       final loadImageNode = _addNode('LoadImageBase64', {
         'image': initImageBase64,
       });
-
       final resizeNode = _addNode('ImageResize', {
         'image': _nodeRef(loadImageNode, 0),
         'width': width,
@@ -505,32 +502,48 @@ class ComfyUIWorkflowBuilder {
         'method': 'fill / crop',
         'condition': 'always',
       });
-
       _latentNode = _addNode('VAEEncode', {
         'pixels': _nodeRef(resizeNode, 0),
         'vae': _nodeRef(_vaeNode, _vaeOutput),
       });
     } else {
-      // Text-to-image mode - use Flux-specific latent (128 channels, /16 compression)
-      _latentNode = _addNode('EmptyFlux2LatentImage', {
+      _latentNode = _addNode('EmptyLatentImage', {
         'width': width,
         'height': height,
         'batch_size': batchSize,
       });
     }
 
-    // Use standard KSampler - simpler and more reliable for Flux 1
-    // Flux uses guidance embedded in conditioning, CFG=1.0 effectively
-    _samplerNode = _addNode('KSampler', {
-      'seed': resolvedSeed,
-      'steps': steps,
-      'cfg': 1.0,  // Flux doesn't use CFG - guidance is in conditioning
-      'sampler_name': sampler,
-      'scheduler': scheduler,
-      'denoise': denoise,
+    // RandomNoise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // BasicGuider - combines model and conditioning
+    final guiderNode = _addNode('BasicGuider', {
       'model': _nodeRef(_modelNode, _modelOutput),
-      'positive': _nodeRef(_positiveNode, 0),
-      'negative': _nodeRef(_negativeNode, 0),
+      'conditioning': _nodeRef(guidanceNode, 0),
+    });
+
+    // KSamplerSelect
+    final samplerSelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': sampler,
+    });
+
+    // BasicScheduler
+    final schedulerNode = _addNode('BasicScheduler', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'scheduler': scheduler,
+      'steps': steps,
+      'denoise': denoise,
+    });
+
+    // SamplerCustomAdvanced
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerSelectNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
       'latent_image': _nodeRef(_latentNode, 0),
     });
 
