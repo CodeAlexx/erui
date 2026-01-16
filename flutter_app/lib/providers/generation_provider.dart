@@ -355,6 +355,43 @@ class GenerationNotifier extends StateNotifier<GenerationState> {
       // Detect model type for specialized workflows
       final modelLower = modelToUse.toLowerCase();
 
+      // Flux.2 Klein models - uses CLIPLoader with flux2 type, Flux2Scheduler, CFGGuider
+      if (modelLower.contains('klein') || modelLower.contains('flux-2-klein') || modelLower.contains('flux2-klein')) {
+        // Detect if it's an edit workflow (has init image)
+        if (params.initImage != null && params.initImage!.isNotEmpty) {
+          return builder.buildFlux2KleinEdit(
+            model: modelToUse,
+            prompt: params.prompt,
+            initImageBase64: params.initImage!,
+            negativePrompt: params.negativePrompt,
+            width: params.width,
+            height: params.height,
+            steps: params.steps,
+            cfgScale: params.cfgScale,
+            denoise: params.initImageCreativity,
+            seed: params.seed,
+            sampler: params.sampler,
+            filenamePrefix: 'ERI_flux2klein_edit',
+            loras: loraConfigs,
+          );
+        } else {
+          return builder.buildFlux2Klein(
+            model: modelToUse,
+            prompt: params.prompt,
+            negativePrompt: params.negativePrompt,
+            width: params.width,
+            height: params.height,
+            steps: params.steps,
+            cfgScale: params.cfgScale,
+            seed: params.seed,
+            sampler: params.sampler,
+            batchSize: params.batchSize,
+            filenamePrefix: 'ERI_flux2klein',
+            loras: loraConfigs,
+          );
+        }
+      }
+
       // Flux models - need UNETLoader + DualCLIP + FluxGuidance + ModelSamplingFlux
       if (modelLower.contains('flux')) {
         return builder.buildFlux(
@@ -1023,6 +1060,19 @@ class GenerationParamsNotifier extends StateNotifier<GenerationParams> {
         height: 1024,
         cfgScale: 4.0,
         steps: 25,
+      );
+    } else if (name.contains('klein') || name.contains('flux-2-klein') || name.contains('flux2-klein')) {
+      // Flux.2 Klein: cfg=5 (base) or cfg=1 (distilled), steps=20 (base) or 4 (distilled)
+      final isDistilled = name.contains('klein-4b') && !name.contains('base');
+      print('DEBUG: Applying Flux.2 Klein defaults (distilled=$isDistilled)');
+      state = state.copyWith(
+        videoMode: false,
+        videoModel: null,
+        width: 1024,
+        height: 1024,
+        cfgScale: isDistilled ? 1.0 : 5.0,
+        steps: isDistilled ? 4 : 20,
+        sampler: 'euler',
       );
     } else if (name.contains('flux')) {
       // Flux: steps=20, cfg=1.0, resolution=1024x1024

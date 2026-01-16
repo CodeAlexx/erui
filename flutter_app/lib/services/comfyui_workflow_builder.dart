@@ -562,6 +562,304 @@ class ComfyUIWorkflowBuilder {
     return Map<String, dynamic>.from(_workflow);
   }
 
+  /// Build a Flux.2 Klein text-to-image workflow
+  ///
+  /// Flux.2 Klein 4B uses:
+  /// - UNETLoader for diffusion model
+  /// - CLIPLoader with type='flux2' for qwen_3_4b text encoder
+  /// - VAELoader for flux2-vae
+  /// - CFGGuider (cfg=5 for base, cfg=1 for distilled)
+  /// - Flux2Scheduler for sigmas
+  /// - EmptyFlux2LatentImage for Flux2-specific latent
+  Map<String, dynamic> buildFlux2Klein({
+    required String model,
+    required String prompt,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 20,
+    double cfgScale = 5.0,
+    int seed = -1,
+    String sampler = 'euler',
+    int batchSize = 1,
+    String clip = 'qwen_3_4b.safetensors',
+    String vae = 'flux2-vae.safetensors',
+    String filenamePrefix = 'ERI_flux2klein',
+    List<LoraConfig>? loras,
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Determine if distilled model (4-step) or base (20-step)
+    final isDistilled = model.toLowerCase().contains('klein-4b') &&
+                        !model.toLowerCase().contains('base');
+
+    // Load Flux2 Klein model using UNETLoader
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': 'default',
+    });
+    _modelOutput = 0;
+
+    // Load CLIP using CLIPLoader with flux2 type
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': clip,
+      'type': 'flux2',
+      'device': 'default',
+    });
+    _clipOutput = 0;
+
+    // Apply LoRAs if provided
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+      }
+    }
+
+    // Load VAE
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae,
+    });
+    _vaeOutput = 0;
+
+    // CLIPTextEncode for positive prompt
+    final positiveNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': prompt,
+    });
+
+    // For distilled model, use ConditioningZeroOut for negative
+    // For base model, use empty CLIPTextEncode
+    String negativeNode;
+    if (isDistilled) {
+      negativeNode = _addNode('ConditioningZeroOut', {
+        'conditioning': _nodeRef(positiveNode, 0),
+      });
+    } else {
+      negativeNode = _addNode('CLIPTextEncode', {
+        'clip': _nodeRef(_clipNode, _clipOutput),
+        'text': negativePrompt,
+      });
+    }
+
+    // CFGGuider - cfg=5 for base, cfg=1 for distilled
+    final effectiveCfg = isDistilled ? 1.0 : cfgScale;
+    final guiderNode = _addNode('CFGGuider', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(positiveNode, 0),
+      'negative': _nodeRef(negativeNode, 0),
+      'cfg': effectiveCfg,
+    });
+
+    // Flux2Scheduler - 4 steps for distilled, 20 for base
+    final effectiveSteps = isDistilled ? 4 : steps;
+    final schedulerNode = _addNode('Flux2Scheduler', {
+      'steps': effectiveSteps,
+      'width': width,
+      'height': height,
+    });
+
+    // EmptyFlux2LatentImage
+    _latentNode = _addNode('EmptyFlux2LatentImage', {
+      'width': width,
+      'height': height,
+      'batch_size': batchSize,
+    });
+
+    // RandomNoise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // KSamplerSelect
+    final samplerSelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': sampler,
+    });
+
+    // SamplerCustomAdvanced
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerSelectNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
+  /// Build a Flux.2 Klein image edit workflow
+  ///
+  /// Takes an input image and edits it based on the prompt.
+  /// Uses the same architecture as t2i but encodes the input image.
+  Map<String, dynamic> buildFlux2KleinEdit({
+    required String model,
+    required String prompt,
+    required String initImageBase64,
+    String negativePrompt = '',
+    int width = 1024,
+    int height = 1024,
+    int steps = 20,
+    double cfgScale = 5.0,
+    double denoise = 0.75,
+    int seed = -1,
+    String sampler = 'euler',
+    String clip = 'qwen_3_4b.safetensors',
+    String vae = 'flux2-vae.safetensors',
+    String filenamePrefix = 'ERI_flux2klein_edit',
+    List<LoraConfig>? loras,
+  }) {
+    reset();
+    final resolvedSeed = _resolveSeed(seed);
+
+    // Determine if distilled model
+    final isDistilled = model.toLowerCase().contains('klein-4b') &&
+                        !model.toLowerCase().contains('base');
+
+    // Load Flux2 Klein model using UNETLoader
+    _modelNode = _addNode('UNETLoader', {
+      'unet_name': model,
+      'weight_dtype': 'default',
+    });
+    _modelOutput = 0;
+
+    // Load CLIP using CLIPLoader with flux2 type
+    _clipNode = _addNode('CLIPLoader', {
+      'clip_name': clip,
+      'type': 'flux2',
+      'device': 'default',
+    });
+    _clipOutput = 0;
+
+    // Apply LoRAs if provided
+    if (loras != null && loras.isNotEmpty) {
+      for (final lora in loras) {
+        final loraNode = _addNode('LoraLoaderModelOnly', {
+          'model': _nodeRef(_modelNode, _modelOutput),
+          'lora_name': lora.name,
+          'strength_model': lora.modelStrength,
+        });
+        _modelNode = loraNode;
+        _modelOutput = 0;
+      }
+    }
+
+    // Load VAE
+    _vaeNode = _addNode('VAELoader', {
+      'vae_name': vae,
+    });
+    _vaeOutput = 0;
+
+    // Load and encode the input image
+    final loadImageNode = _addNode('LoadImageBase64', {
+      'image': initImageBase64,
+    });
+
+    // Resize to target dimensions
+    final resizeNode = _addNode('ImageResize', {
+      'image': _nodeRef(loadImageNode, 0),
+      'width': width,
+      'height': height,
+      'interpolation': 'bicubic',
+      'method': 'fill / crop',
+      'condition': 'always',
+    });
+
+    // Encode to latent
+    _latentNode = _addNode('VAEEncode', {
+      'pixels': _nodeRef(resizeNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // CLIPTextEncode for positive prompt
+    final positiveNode = _addNode('CLIPTextEncode', {
+      'clip': _nodeRef(_clipNode, _clipOutput),
+      'text': prompt,
+    });
+
+    // For distilled model, use ConditioningZeroOut for negative
+    String negativeNode;
+    if (isDistilled) {
+      negativeNode = _addNode('ConditioningZeroOut', {
+        'conditioning': _nodeRef(positiveNode, 0),
+      });
+    } else {
+      negativeNode = _addNode('CLIPTextEncode', {
+        'clip': _nodeRef(_clipNode, _clipOutput),
+        'text': negativePrompt,
+      });
+    }
+
+    // CFGGuider
+    final effectiveCfg = isDistilled ? 1.0 : cfgScale;
+    final guiderNode = _addNode('CFGGuider', {
+      'model': _nodeRef(_modelNode, _modelOutput),
+      'positive': _nodeRef(positiveNode, 0),
+      'negative': _nodeRef(negativeNode, 0),
+      'cfg': effectiveCfg,
+    });
+
+    // Flux2Scheduler with denoise
+    final effectiveSteps = isDistilled ? 4 : steps;
+    final schedulerNode = _addNode('Flux2Scheduler', {
+      'steps': effectiveSteps,
+      'width': width,
+      'height': height,
+      'denoise': denoise,
+    });
+
+    // RandomNoise
+    final noiseNode = _addNode('RandomNoise', {
+      'noise_seed': resolvedSeed,
+    });
+
+    // KSamplerSelect
+    final samplerSelectNode = _addNode('KSamplerSelect', {
+      'sampler_name': sampler,
+    });
+
+    // SamplerCustomAdvanced
+    _samplerNode = _addNode('SamplerCustomAdvanced', {
+      'noise': _nodeRef(noiseNode, 0),
+      'guider': _nodeRef(guiderNode, 0),
+      'sampler': _nodeRef(samplerSelectNode, 0),
+      'sigmas': _nodeRef(schedulerNode, 0),
+      'latent_image': _nodeRef(_latentNode, 0),
+    });
+
+    // VAE Decode
+    _imageNode = _addNode('VAEDecode', {
+      'samples': _nodeRef(_samplerNode, 0),
+      'vae': _nodeRef(_vaeNode, _vaeOutput),
+    });
+
+    // Save image
+    _addNode('SaveImage', {
+      'filename_prefix': filenamePrefix,
+      'images': _nodeRef(_imageNode, 0),
+    });
+
+    return Map<String, dynamic>.from(_workflow);
+  }
+
   /// Build an SD3.5 image generation workflow
   ///
   /// SD3.5 models require:
