@@ -5,6 +5,7 @@ from collections.abc import Iterable
 import modules.util.multi_gpu_util as multi
 from modules.dataLoader.BaseDataLoader import BaseDataLoader
 from modules.dataLoader.ChromaBaseDataLoader import ChromaBaseDataLoader
+from modules.dataLoader.Flux2BaseDataLoader import Flux2BaseDataLoader
 from modules.dataLoader.FluxBaseDataLoader import FluxBaseDataLoader
 from modules.dataLoader.HiDreamBaseDataLoader import HiDreamBaseDataLoader
 from modules.dataLoader.HunyuanVideoBaseDataLoader import HunyuanVideoBaseDataLoader
@@ -19,12 +20,13 @@ from modules.dataLoader.StableDiffusionXLBaseDataLoader import StableDiffusionXL
 from modules.dataLoader.WuerstchenBaseDataLoader import WuerstchenBaseDataLoader
 from modules.dataLoader.ZImageBaseDataLoader import ZImageBaseDataLoader
 from modules.dataLoader.WanBaseDataLoader import WanBaseDataLoader
-from modules.dataLoader.Kandinsky5DataLoader import Kandinsky5DataLoader
+# from modules.dataLoader.Kandinsky5DataLoader import Kandinsky5DataLoader  # DISABLED: kandinsky not installed
 from modules.model.BaseModel import BaseModel
 from modules.modelLoader.BaseModelLoader import BaseModelLoader
 from modules.modelLoader.ChromaEmbeddingModelLoader import ChromaEmbeddingModelLoader
 from modules.modelLoader.ChromaFineTuneModelLoader import ChromaFineTuneModelLoader
 from modules.modelLoader.ChromaLoRAModelLoader import ChromaLoRAModelLoader
+from modules.modelLoader.Flux2ModelLoader import Flux2FineTuneModelLoader, Flux2LoRAModelLoader
 from modules.modelLoader.FluxEmbeddingModelLoader import FluxEmbeddingModelLoader
 from modules.modelLoader.FluxFineTuneModelLoader import FluxFineTuneModelLoader
 from modules.modelLoader.FluxLoRAModelLoader import FluxLoRAModelLoader
@@ -58,9 +60,10 @@ from modules.modelLoader.WuerstchenLoRAModelLoader import WuerstchenLoRAModelLoa
 from modules.modelLoader.ZImageModelLoader import ZImageFineTuneModelLoader, ZImageLoRAModelLoader
 from modules.modelLoader.WanFineTuneModelLoader import WanFineTuneModelLoader
 from modules.modelLoader.WanLoRAModelLoader import WanLoRAModelLoader
-from modules.modelLoader.Kandinsky5ModelLoader import Kandinsky5ModelLoader
+# from modules.modelLoader.Kandinsky5ModelLoader import Kandinsky5ModelLoader  # DISABLED: kandinsky not installed
 from modules.modelSampler import BaseModelSampler
 from modules.modelSampler.ChromaSampler import ChromaSampler
+from modules.modelSampler.Flux2Sampler import Flux2Sampler
 from modules.modelSampler.FluxSampler import FluxSampler
 from modules.modelSampler.HiDreamSampler import HiDreamSampler
 from modules.modelSampler.HunyuanVideoSampler import HunyuanVideoSampler
@@ -75,11 +78,13 @@ from modules.modelSampler.StableDiffusionXLSampler import StableDiffusionXLSampl
 from modules.modelSampler.WuerstchenSampler import WuerstchenSampler
 from modules.modelSampler.ZImageSampler import ZImageSampler
 from modules.modelSampler.WanSampler import WanSampler
-from modules.modelSampler.Kandinsky5Sampler import Kandinsky5Sampler
+# from modules.modelSampler.Kandinsky5Sampler import Kandinsky5Sampler  # DISABLED: kandinsky not installed
 from modules.modelSaver.BaseModelSaver import BaseModelSaver
 from modules.modelSaver.ChromaEmbeddingModelSaver import ChromaEmbeddingModelSaver
 from modules.modelSaver.ChromaFineTuneModelSaver import ChromaFineTuneModelSaver
 from modules.modelSaver.ChromaLoRAModelSaver import ChromaLoRAModelSaver
+from modules.modelSaver.Flux2FineTuneModelSaver import Flux2FineTuneModelSaver
+from modules.modelSaver.Flux2LoRAModelSaver import Flux2LoRAModelSaver
 from modules.modelSaver.FluxEmbeddingModelSaver import FluxEmbeddingModelSaver
 from modules.modelSaver.FluxFineTuneModelSaver import FluxFineTuneModelSaver
 from modules.modelSaver.FluxLoRAModelSaver import FluxLoRAModelSaver
@@ -113,12 +118,14 @@ from modules.modelSaver.ZImageFineTuneModelSaver import ZImageFineTuneModelSaver
 from modules.modelSaver.ZImageLoRAModelSaver import ZImageLoRAModelSaver
 from modules.modelSaver.WanFineTuneModelSaver import WanFineTuneModelSaver
 from modules.modelSaver.WanLoRAModelSaver import WanLoRAModelSaver
-from modules.modelSaver.Kandinsky5FineTuneModelSaver import Kandinsky5FineTuneModelSaver
-from modules.modelSaver.Kandinsky5LoRAModelSaver import Kandinsky5LoRAModelSaver
+# from modules.modelSaver.Kandinsky5FineTuneModelSaver import Kandinsky5FineTuneModelSaver  # DISABLED: kandinsky not installed
+# from modules.modelSaver.Kandinsky5LoRAModelSaver import Kandinsky5LoRAModelSaver  # DISABLED: kandinsky not installed
 from modules.modelSetup.BaseModelSetup import BaseModelSetup
 from modules.modelSetup.ChromaEmbeddingSetup import ChromaEmbeddingSetup
 from modules.modelSetup.ChromaFineTuneSetup import ChromaFineTuneSetup
 from modules.modelSetup.ChromaLoRASetup import ChromaLoRASetup
+from modules.modelSetup.Flux2FineTuneSetup import Flux2FineTuneSetup
+from modules.modelSetup.Flux2LoRASetup import Flux2LoRASetup
 from modules.modelSetup.FluxEmbeddingSetup import FluxEmbeddingSetup
 from modules.modelSetup.FluxFineTuneSetup import FluxFineTuneSetup
 from modules.modelSetup.FluxLoRASetup import FluxLoRASetup
@@ -154,8 +161,8 @@ from modules.modelSetup.ZImageFineTuneSetup import ZImageFineTuneSetup
 from modules.modelSetup.ZImageLoRASetup import ZImageLoRASetup
 from modules.modelSetup.WanFineTuneSetup import WanFineTuneSetup
 from modules.modelSetup.WanLoRASetup import WanLoRASetup
-from modules.modelSetup.Kandinsky5FineTuneSetup import Kandinsky5FineTuneSetup
-from modules.modelSetup.Kandinsky5LoRASetup import Kandinsky5LoRASetup
+# from modules.modelSetup.Kandinsky5FineTuneSetup import Kandinsky5FineTuneSetup  # DISABLED: kandinsky not installed
+# from modules.modelSetup.Kandinsky5LoRASetup import Kandinsky5LoRASetup  # DISABLED: kandinsky not installed
 from modules.module.EMAModule import EMAModuleWrapper
 from modules.util.callbacks.TrainCallbacks import TrainCallbacks
 from modules.util.commands.TrainCommands import TrainCommands
@@ -215,6 +222,8 @@ def create_model_loader(
                 return StableDiffusion3FineTuneModelLoader()
             if model_type.is_flux():
                 return FluxFineTuneModelLoader()
+            if model_type.is_flux2():
+                return Flux2FineTuneModelLoader()
             if model_type.is_chroma():
                 return ChromaFineTuneModelLoader()
             if model_type.is_qwen():
@@ -230,7 +239,7 @@ def create_model_loader(
             if model_type.is_wan():
                 return WanFineTuneModelLoader()
             if model_type.is_kandinsky_5():
-                return Kandinsky5ModelLoader()
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5ModelLoader()
         case TrainingMethod.FINE_TUNE_VAE:
             if model_type.is_stable_diffusion():
                 return StableDiffusionFineTuneModelLoader()
@@ -247,6 +256,8 @@ def create_model_loader(
                 return StableDiffusion3LoRAModelLoader()
             if model_type.is_flux():
                 return FluxLoRAModelLoader()
+            if model_type.is_flux2():
+                return Flux2LoRAModelLoader()
             if model_type.is_chroma():
                 return ChromaLoRAModelLoader()
             if model_type.is_qwen():
@@ -264,7 +275,7 @@ def create_model_loader(
             if model_type.is_wan():
                 return WanLoRAModelLoader()
             if model_type.is_kandinsky_5():
-                return Kandinsky5ModelLoader()
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5ModelLoader()
         case TrainingMethod.EMBEDDING:
             if model_type.is_stable_diffusion():
                 return StableDiffusionEmbeddingModelLoader()
@@ -308,6 +319,8 @@ def create_model_saver(
                 return StableDiffusion3FineTuneModelSaver()
             if model_type.is_flux():
                 return FluxFineTuneModelSaver()
+            if model_type.is_flux2():
+                return Flux2FineTuneModelSaver()
             if model_type.is_chroma():
                 return ChromaFineTuneModelSaver()
             if model_type.is_qwen():
@@ -321,7 +334,7 @@ def create_model_saver(
             if model_type.is_wan():
                 return WanFineTuneModelSaver()
             if model_type.is_kandinsky_5():
-                 return Kandinsky5FineTuneModelSaver()
+                 raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5FineTuneModelSaver()
         case TrainingMethod.FINE_TUNE_VAE:
             if model_type.is_stable_diffusion():
                 return StableDiffusionFineTuneModelSaver()
@@ -338,6 +351,8 @@ def create_model_saver(
                 return StableDiffusion3LoRAModelSaver()
             if model_type.is_flux():
                 return FluxLoRAModelSaver()
+            if model_type.is_flux2():
+                return Flux2LoRAModelSaver()
             if model_type.is_chroma():
                 return ChromaLoRAModelSaver()
             if model_type.is_qwen():
@@ -355,7 +370,7 @@ def create_model_saver(
             if model_type.is_wan():
                 return WanLoRAModelSaver()
             if model_type.is_kandinsky_5():
-                return Kandinsky5LoRAModelSaver()
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5LoRAModelSaver()
         case TrainingMethod.EMBEDDING:
             if model_type.is_stable_diffusion():
                 return StableDiffusionEmbeddingModelSaver()
@@ -402,6 +417,8 @@ def create_model_setup(
                 return StableDiffusion3FineTuneSetup(train_device, temp_device, debug_mode)
             if model_type.is_flux():
                 return FluxFineTuneSetup(train_device, temp_device, debug_mode)
+            if model_type.is_flux2():
+                return Flux2FineTuneSetup(train_device, temp_device, debug_mode)
             if model_type.is_chroma():
                 return ChromaFineTuneSetup(train_device, temp_device, debug_mode)
             if model_type.is_qwen():
@@ -417,7 +434,7 @@ def create_model_setup(
             if model_type.is_wan():
                 return WanFineTuneSetup(train_device, temp_device, debug_mode)
             if model_type.is_kandinsky_5():
-                return Kandinsky5FineTuneSetup()
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5FineTuneSetup()
         case TrainingMethod.FINE_TUNE_VAE:
             if model_type.is_stable_diffusion():
                 return StableDiffusionFineTuneVaeSetup(train_device, temp_device, debug_mode)
@@ -434,6 +451,8 @@ def create_model_setup(
                 return StableDiffusion3LoRASetup(train_device, temp_device, debug_mode)
             if model_type.is_flux():
                 return FluxLoRASetup(train_device, temp_device, debug_mode)
+            if model_type.is_flux2():
+                return Flux2LoRASetup(train_device, temp_device, debug_mode)
             if model_type.is_chroma():
                 return ChromaLoRASetup(train_device, temp_device, debug_mode)
             if model_type.is_qwen():
@@ -451,7 +470,7 @@ def create_model_setup(
             if model_type.is_wan():
                 return WanLoRASetup(train_device, temp_device, debug_mode)
             if model_type.is_kandinsky_5():
-                return Kandinsky5LoRASetup(train_device, temp_device, debug_mode)
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5LoRASetup(train_device, temp_device, debug_mode)
         case TrainingMethod.EMBEDDING:
             if model_type.is_stable_diffusion():
                 return StableDiffusionEmbeddingSetup(train_device, temp_device, debug_mode)
@@ -498,6 +517,8 @@ def create_model_sampler(
                 return StableDiffusion3Sampler(train_device, temp_device, model, model_type)
             if model_type.is_flux():
                 return FluxSampler(train_device, temp_device, model, model_type)
+            if model_type.is_flux2():
+                return Flux2Sampler(train_device, temp_device, model, model_type)
             if model_type.is_chroma():
                 return ChromaSampler(train_device, temp_device, model, model_type)
             if model_type.is_qwen():
@@ -515,7 +536,7 @@ def create_model_sampler(
             if model_type.is_wan():
                 return WanSampler(train_device, temp_device, model, model_type)
             if model_type.is_kandinsky_5():
-                return Kandinsky5Sampler(train_device, temp_device, model)
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5Sampler(train_device, temp_device, model)
         case TrainingMethod.FINE_TUNE_VAE:
             if model_type.is_stable_diffusion():
                 return StableDiffusionVaeSampler(train_device, temp_device, model, model_type)
@@ -553,6 +574,8 @@ def create_data_loader(
                 return StableDiffusion3BaseDataLoader(train_device, temp_device, config, model, train_progress, is_validation)
             if model_type.is_flux():
                 return FluxBaseDataLoader(train_device, temp_device, config, model, train_progress, is_validation)
+            if model_type.is_flux2():
+                return Flux2BaseDataLoader(train_device, temp_device, config, model, train_progress, is_validation)
             if model_type.is_chroma():
                 return ChromaBaseDataLoader(train_device, temp_device, config, model, train_progress, is_validation)
             if model_type.is_qwen():
@@ -570,7 +593,7 @@ def create_data_loader(
             if model_type.is_wan():
                 return WanBaseDataLoader(train_device, temp_device, config, model, train_progress, is_validation)
             if model_type.is_kandinsky_5():
-                return Kandinsky5DataLoader(train_device, temp_device, config, model, train_progress, is_validation)
+                raise NotImplementedError("Kandinsky5 not installed")  # return Kandinsky5DataLoader(train_device, temp_device, config, model, train_progress, is_validation)
         case TrainingMethod.FINE_TUNE_VAE:
             if model_type.is_stable_diffusion():
                 return StableDiffusionFineTuneVaeDataLoader(train_device, temp_device, config, model, train_progress, is_validation)

@@ -25,6 +25,7 @@ class ModelType(Enum):
 
     FLUX_DEV_1 = 'FLUX_DEV_1'
     FLUX_FILL_DEV_1 = 'FLUX_FILL_DEV_1'
+    FLUX_2 = 'FLUX_2'
 
     SANA = 'SANA'
 
@@ -84,6 +85,9 @@ class ModelType(Enum):
     def is_flux(self):
         return self == ModelType.FLUX_DEV_1 \
             or self == ModelType.FLUX_FILL_DEV_1
+
+    def is_flux2(self):
+        return self == ModelType.FLUX_2
 
     def is_chroma(self):
         return self == ModelType.CHROMA_1
@@ -161,6 +165,7 @@ class ModelType(Enum):
     def is_flow_matching(self) -> bool:
         return self.is_stable_diffusion_3() \
             or self.is_flux() \
+            or self.is_flux2() \
             or self.is_chroma() \
             or self.is_qwen() \
             or self.is_qwen_image_edit() \
