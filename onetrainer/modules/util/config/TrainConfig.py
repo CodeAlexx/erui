@@ -497,6 +497,7 @@ class TrainConfig(BaseConfig):
     # text encoder
     text_encoder: TrainModelPartConfig
     text_encoder_layer_skip: int
+    text_encoder_sequence_length: int
 
     # text encoder 2
     text_encoder_2: TrainModelPartConfig
@@ -535,6 +536,7 @@ class TrainConfig(BaseConfig):
 
     # custom conditioning image
     custom_conditioning_image: bool
+    edit_mode: bool
 
     # embedding
     embedding_learning_rate: float
@@ -1135,6 +1137,7 @@ class TrainConfig(BaseConfig):
         text_encoder.learning_rate = None
         data.append(("text_encoder", text_encoder, TrainModelPartConfig, False))
         data.append(("text_encoder_layer_skip", 0, int, False))
+        data.append(("text_encoder_sequence_length", 512, int, True))
 
         # text encoder 2
         text_encoder_2 = TrainModelPartConfig.default_values()
@@ -1194,6 +1197,7 @@ class TrainConfig(BaseConfig):
         data.append(("normalize_masked_area_loss", False, bool, False))
         data.append(("masked_prior_preservation_weight", 0.0, float, False))
         data.append(("custom_conditioning_image", False, bool, False))
+        data.append(("edit_mode", False, bool, False))
 
         #layer filter
         data.append(("layer_filter", "", str, False))
