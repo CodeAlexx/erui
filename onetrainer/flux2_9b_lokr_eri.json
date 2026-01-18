@@ -11,10 +11,10 @@
   "output_dtype": "BFLOAT_16",
   "output_model_format": "SAFETENSORS",
   "output_model_destination": "/home/alex/flux2_9b_lokr/model/flux2_9b_lokr_eri",
-  "gradient_checkpointing": "ON",
+  "gradient_checkpointing": "CPU_OFFLOADED",
   "enable_async_offloading": true,
   "enable_activation_offloading": true,
-  "layer_offload_fraction": 0,
+  "layer_offload_fraction": 0.9,
   "compile": false,
   "concepts": [
     {
@@ -25,7 +25,7 @@
   ],
   "aspect_ratio_bucketing": true,
   "latent_caching": true,
-  "clear_cache_before_training": true,
+  "clear_cache_before_training": false,
   "learning_rate_scheduler": "CONSTANT",
   "learning_rate": 0.0003,
   "learning_rate_warmup_steps": 200,
